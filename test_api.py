@@ -109,7 +109,7 @@ def test_races_list_api():
         return False
 
 if __name__ == "__main__":
-    print("Timataka API Test Suite")
+    print("hlaupatimar API Test Suite")
     print("=" * 50)
     
     # Test scraping API

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Development helper script for Timataka
+# Development helper script for Hlaupatimar
 
 case "$1" in
     "build")

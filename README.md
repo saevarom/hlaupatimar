@@ -1,4 +1,4 @@
-# Timataka - Icelandic Running Competitions API
+# Hlaupatimar - Icelandic Running Competitions API
 
 A Django-based API for aggregating and managing data about running competitions and races in Iceland. Built with Django Ninja for modern API development and PostgreSQL for robust data storage.
 
@@ -29,7 +29,7 @@ A Django-based API for aggregating and managing data about running competitions 
 1. Clone the repository:
 ```bash
 git clone <your-repo-url>
-cd timataka
+cd hlaupatimar
 ```
 
 2. Copy the environment file:
@@ -123,7 +123,7 @@ docker-compose logs -f web
 
 ```bash
 # Access PostgreSQL directly
-docker-compose exec db psql -U timataka_user -d timataka
+docker-compose exec db psql -U hlaupatimar_user -d hlaupatimar
 ```
 
 ## Environment Variables

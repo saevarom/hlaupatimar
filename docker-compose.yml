@@ -5,15 +5,15 @@ services:
     image: postgres:15-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: timataka
-      POSTGRES_USER: timataka_user
-      POSTGRES_PASSWORD: timataka_password
+      POSTGRES_DB: hlaupatimar
+      POSTGRES_USER: hlaupatimar_user
+      POSTGRES_PASSWORD: hlaupatimar_password
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5433:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U timataka_user -d timataka"]
+      test: ["CMD-SHELL", "pg_isready -U hlaupatimar_user -d hlaupatimar"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -22,10 +22,10 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "8002:8000"
+      - "8999:8000"
     environment:
       - DEBUG=1
-      - DATABASE_URL=postgresql://timataka_user:timataka_password@db:5432/timataka
+      - DATABASE_URL=postgresql://hlaupatimar_user:hlaupatimar_password@db:5432/hlaupatimar
       - SECRET_KEY=django-insecure-dev-key-change-in-production
     volumes:
       - .:/app

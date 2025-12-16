@@ -12,7 +12,7 @@ project_dir = Path(__file__).parent
 sys.path.insert(0, str(project_dir))
 
 # Set up Django environment
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'timataka.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'hlaupatimar.settings')
 
 import django
 django.setup()

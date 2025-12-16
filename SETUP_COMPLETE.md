@@ -115,12 +115,12 @@ Now you're ready to:
 ## Project Structure
 
 ```
-timataka/
+hlaupatimar/
 ├── docker-compose.yml      # Docker services configuration
 ├── Dockerfile             # Python/Django container
 ├── requirements.txt       # Python dependencies
 ├── manage.py             # Django management script
-├── timataka/             # Django project settings
+├── hlaupatimar/             # Django project settings
 │   ├── settings.py       # Main configuration
 │   ├── urls.py          # URL routing
 │   └── ...

@@ -37,7 +37,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-ROOT_URLCONF = 'timataka.urls'
+ROOT_URLCONF = 'hlaupatimar.urls'
 
 TEMPLATES = [
     {
@@ -55,12 +55,12 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'timataka.wsgi.application'
+WSGI_APPLICATION = 'hlaupatimar.wsgi.application'
 
 # Database
 DATABASES = {
     'default': dj_database_url.parse(
-        config('DATABASE_URL', default='postgresql://timataka_user:timataka_password@localhost:5432/timataka')
+        config('DATABASE_URL', default='postgresql://hlaupatimar_user:hlaupatimar_password@localhost:5432/hlaupatimar')
     )
 }
 

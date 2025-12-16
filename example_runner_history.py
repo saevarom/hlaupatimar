@@ -12,7 +12,7 @@ import django
 
 # Setup Django
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'timataka.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'hlaupatimar.settings')
 django.setup()
 
 from races.models import Runner
