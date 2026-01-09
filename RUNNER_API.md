@@ -4,13 +4,7 @@ This document describes the Runner API endpoints for searching and retrieving de
 
 ## Base URL
 
-All endpoin```python
-# Search for runners
-response = requests.get(
-    "http://localhost:8000/api/races/runners/search",
-    params={"q": "Pétur", "limit": 5}
-)
-runners = response.json()re available under the base URL: `http://localhost:8000/api/races/`
+All endpoints are available under the base URL: `http://localhost:8002/api/races/`
 
 ## Authentication
 
@@ -152,10 +146,10 @@ GET /api/races/runners/52199
 
 ```bash
 # Search for runners
-curl "http://localhost:8000/api/races/runners/search?q=Pétur&limit=3"
+curl "http://localhost:8002/api/races/runners/search?q=Pétur&limit=3"
 
 # Get runner details
-curl "http://localhost:8000/api/races/runners/52199"
+curl "http://localhost:8002/api/races/runners/52199"
 ```
 
 ### Using Python requests
@@ -165,14 +159,14 @@ import requests
 
 # Search for runners
 response = requests.get(
-    "http://localhost:8000/api/races/runners",
+    "http://localhost:8002/api/races/runners/search",
     params={"q": "Pétur", "limit": 5}
 )
 runners = response.json()
 
 # Get runner details
 runner_id = runners[0]["id"]
-response = requests.get(f"http://localhost:8000/api/races/runners/{runner_id}")
+response = requests.get(f"http://localhost:8002/api/races/runners/{runner_id}")
 runner_detail = response.json()
 
 print(f"Runner: {runner_detail['name']}")
@@ -215,7 +209,7 @@ fetch('/api/races/runners/search?q=Pétur&limit=5')
 
 ```json
 {
-  "error": "Error message describing what went wrong"
+  "detail": "Error message describing what went wrong"
 }
 ```
 
@@ -233,7 +227,7 @@ Currently, no rate limiting is implemented, but this may be added in future vers
 ## Interactive API Documentation
 
 For interactive API testing and more detailed schema information, visit:
-**http://localhost:8000/api/docs**
+**http://localhost:8002/api/docs**
 
 This provides a Swagger/OpenAPI interface where you can test endpoints directly from your browser.
 

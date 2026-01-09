@@ -1,40 +1,19 @@
 version: '3.8'
 
 services:
-  db:
-    image: postgres:15-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: hlaupatimar
-      POSTGRES_USER: hlaupatimar_user
-      POSTGRES_PASSWORD: hlaupatimar_password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hlaupatimar_user -d hlaupatimar"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   web:
     build: .
     restart: unless-stopped
     ports:
-      - "8999:8000"
+      - "8002:8000"
+    env_file:
+      - .env
     environment:
-      - DEBUG=1
-      - DATABASE_URL=postgresql://hlaupatimar_user:hlaupatimar_password@db:5432/hlaupatimar
-      - SECRET_KEY=django-insecure-dev-key-change-in-production
+      - DEBUG=${DEBUG:-1}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://som:@localhost:5416/hlaupatimar}
+      - SECRET_KEY=${SECRET_KEY:-django-insecure-dev-key-change-in-production}
     volumes:
       - .:/app
-    depends_on:
-      db:
-        condition: service_healthy
     command: >
       sh -c "python manage.py migrate &&
              python manage.py runserver 0.0.0.0:8000"
-
-volumes:
-  postgres_data:

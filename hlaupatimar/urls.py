@@ -5,7 +5,7 @@ from races.api import router as races_router
 
 # Create the main API instance
 api = NinjaAPI(
-    title="Timataka API",
+    title="Hlaupatimar API",
     description="API for Icelandic running competitions data aggregation",
     version="1.0.0"
 )
