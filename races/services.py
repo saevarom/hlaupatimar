@@ -776,7 +776,7 @@ class ScrapingService:
                             logger.info(f"Corsa event already has {existing_races} races from discovery phase")
                             races_created_count = existing_races
                         else:
-                            logger.warning(f"Corsa event has no races - may need to re-run discover_corsa_events")
+                            logger.warning(f"Corsa event has no races - may need to re-run corsa_discover_events")
                     else:
                         # For Timataka events, extract races from event URL
                         scraper = self.get_scraper(event.source)

@@ -155,8 +155,8 @@ All functionality has been thoroughly tested:
 - **This Summary**: Implementation overview and examples
 
 ### **Management Commands**
-- **CLI Tool**: `python manage.py runner_history --runner-id <id>`
-- **Search CLI**: `python manage.py runner_history "Name" --limit 5`
+- **CLI Tool**: `python manage.py runner_race_history --runner-id <id>`
+- **Search CLI**: `python manage.py runner_race_history "Name" --limit 5`
 
 ## 🔧 Technical Implementation
 

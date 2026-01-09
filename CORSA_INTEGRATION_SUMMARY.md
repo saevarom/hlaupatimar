@@ -21,7 +21,7 @@
 - **Result data normalization** - handles different data formats from different sources
 
 ### ✅ **Management Command Created**
-- **New `discover_corsa_events` command** with full feature set:
+- **New `corsa_discover_events` command** with full feature set:
   - `--dry-run` mode for testing
   - `--force-refresh` for bypassing cache
   - `--overwrite` for updating existing events
@@ -143,16 +143,16 @@ The only remaining piece is enhancing the results extraction to handle JavaScrip
 
 ```bash
 # Discover all Corsa events (dry run) - ✅ Working
-python manage.py discover_corsa_events --dry-run
+python manage.py corsa_discover_events --dry-run
 
 # Save first 5 Corsa events to database  
-python manage.py discover_corsa_events --limit 5
+python manage.py corsa_discover_events --limit 5
 
 # Update existing events with fresh data
-python manage.py discover_corsa_events --overwrite --force-refresh
+python manage.py corsa_discover_events --overwrite --force-refresh
 
 # Process results from both Timataka and Corsa races
-python manage.py process_results --limit 10
+python manage.py timataka_process_results --limit 10
 ```
 
 The system now successfully handles both timataka.net and corsa.is as data sources with consistent patterns and excellent maintainability! 🎉

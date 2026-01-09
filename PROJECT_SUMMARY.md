@@ -46,7 +46,7 @@
 - `GET/POST /api/races/results/{id}/splits` - Split times
 
 ### 🛠️ Command Line Interface
-- `python manage.py scrape_timataka --file <html_file> [--save] [--output <json_file>]`
+- `python manage.py timataka_scrape_file --file <html_file> [--save] [--output <json_file>]`
 - Support for file input and JSON export
 - Optional database saving
 

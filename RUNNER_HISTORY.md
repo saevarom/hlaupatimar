@@ -129,22 +129,22 @@ def runner_detail(request, runner_id):
 
 ## Management Commands
 
-### `runner_history`
+### `runner_race_history`
 
 A Django management command for viewing runner history from the command line.
 
 **Usage**:
 ```bash
 # Search by name
-python manage.py runner_history "Runner Name"
-python manage.py runner_history "Runner Name" --limit 5
+python manage.py runner_race_history "Runner Name"
+python manage.py runner_race_history "Runner Name" --limit 5
 
 # Search by ID
-python manage.py runner_history --runner-id 12345
-python manage.py runner_history --runner-id 12345 --limit 3
+python manage.py runner_race_history --runner-id 12345
+python manage.py runner_race_history --runner-id 12345 --limit 3
 
 # JSON output
-python manage.py runner_history --runner-id 12345 --json
+python manage.py runner_race_history --runner-id 12345 --json
 ```
 
 **Options**:

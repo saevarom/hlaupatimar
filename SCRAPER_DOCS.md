@@ -34,13 +34,13 @@ The scraper can automatically detect and classify these race types:
 
 ```bash
 # Basic scraping (display only)
-python manage.py scrape_timataka --file sample_data/tindahlaup-2025.html
+python manage.py timataka_scrape_file --file sample_data/tindahlaup-2025.html
 
 # Save to database
-python manage.py scrape_timataka --file sample_data/tindahlaup-2025.html --save
+python manage.py timataka_scrape_file --file sample_data/tindahlaup-2025.html --save
 
 # Export to JSON
-python manage.py scrape_timataka --file sample_data/tindahlaup-2025.html --output races.json
+python manage.py timataka_scrape_file --file sample_data/tindahlaup-2025.html --output races.json
 ```
 
 ### API Endpoints
