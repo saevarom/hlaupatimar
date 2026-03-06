@@ -3,6 +3,7 @@ django-ninja==1.0.1
 psycopg2-binary==2.9.9
 python-decouple==3.8
 django-cors-headers==4.3.1
+django-extensions==3.2.3
 gunicorn==21.2.0
 dj-database-url==2.1.0
 beautifulsoup4==4.12.2

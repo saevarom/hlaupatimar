@@ -1,3 +1,7 @@
+import base64
+import hashlib
+import re
+
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 
@@ -13,6 +17,7 @@ class Runner(models.Model):
     """Model representing a unique runner/participant"""
     
     name = models.CharField(max_length=200)
+    stable_id = models.CharField(max_length=16, unique=True, editable=False, null=True, blank=True)
     birth_year = models.IntegerField(null=True, blank=True, validators=[MinValueValidator(1900), MaxValueValidator(2020)])
     gender = models.CharField(max_length=1, choices=[('M', 'Male'), ('F', 'Female')], blank=True)
     nationality = models.CharField(max_length=3, default='ISL', help_text="ISO 3166-1 alpha-3 country code")
@@ -28,6 +33,30 @@ class Runner(models.Model):
             models.Index(fields=['birth_year']),
             models.Index(fields=['name', 'birth_year']),
         ]
+
+    @staticmethod
+    def build_stable_id(name: str, birth_year: int | None, gender: str | None) -> str:
+        """Generate a deterministic ID from name, birth year, and gender."""
+        normalized_name = re.sub(r'\s+', ' ', (name or '').strip()).casefold()
+        normalized_gender = (gender or '').strip().upper()
+        birth_year_value = str(birth_year) if birth_year else ''
+        raw = f"{normalized_name}|{birth_year_value}|{normalized_gender}"
+        digest = hashlib.sha256(raw.encode('utf-8')).digest()
+        token = base64.b32encode(digest).decode('ascii').rstrip('=')
+        return f"rnr_{token[:12].lower()}"
+
+    def save(self, *args, **kwargs):
+        if self.birth_year:
+            computed_id = self.build_stable_id(self.name, self.birth_year, self.gender)
+            if self.stable_id != computed_id:
+                conflict = Runner.objects.filter(stable_id=computed_id).exclude(pk=self.pk).exists()
+                if conflict:
+                    self.stable_id = None
+                else:
+                    self.stable_id = computed_id
+        else:
+            self.stable_id = None
+        super().save(*args, **kwargs)
     
     def __str__(self):
         if self.birth_year:

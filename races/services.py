@@ -71,7 +71,7 @@ class ScrapingService:
                 }
             else:
                 # For Timataka, use the existing method
-                results_data = scraper.scrape_race_results(html_content, race_id)
+                results_data = scraper.scrape_race_results(html_content, race_id, race_date=race.date)
             
             result['scraped'] = results_data['results_count']
             
@@ -241,6 +241,15 @@ class ScrapingService:
     def _get_or_create_runner(self, name: str, birth_year: Optional[int], gender: str = '') -> Runner:
         """Get or create a runner by name and birth year"""
         created = False  # Initialize created variable
+
+        if birth_year:
+            stable_id = Runner.build_stable_id(name, birth_year, gender)
+            existing_runner = Runner.objects.filter(stable_id=stable_id).first()
+            if existing_runner:
+                if gender and not existing_runner.gender:
+                    existing_runner.gender = gender
+                    existing_runner.save(update_fields=['gender', 'updated_at'])
+                return existing_runner
         
         # Try to find existing runner by name and birth year
         if birth_year:
@@ -307,7 +316,7 @@ class ScrapingService:
         
         try:
             # Scrape race data
-            races_data = self.scraper.scrape_race_data(html_content, source_url)
+            races_data = self.timataka_scraper.scrape_race_data(html_content, source_url)
             result['scraped'] = len(races_data)
             
             # Save each race to database
@@ -345,7 +354,7 @@ class ScrapingService:
         Returns:
             List of race dictionaries
         """
-        return self.scraper.scrape_race_data(html_content, source_url)
+        return self.timataka_scraper.scrape_race_data(html_content, source_url)
     
     def _save_race_to_db(self, race_data: Dict, overwrite: bool = False) -> str:
         """
@@ -408,7 +417,7 @@ class ScrapingService:
         
         try:
             # Discover events from homepage (with caching support)
-            discovered_events = self.scraper.discover_races_from_homepage(force_refresh=force_refresh)
+            discovered_events = self.timataka_scraper.discover_races_from_homepage(force_refresh=force_refresh)
             
             # Apply limit if specified
             if limit and len(discovered_events) > limit:
@@ -460,7 +469,7 @@ class ScrapingService:
                         if cache_html and not existing_event.cached_html:
                             try:
                                 logger.info(f"Caching HTML for existing event: {existing_event.name}")
-                                html_content = self.scraper._fetch_html_with_cache(existing_event.url, existing_event)
+                                html_content = self.timataka_scraper._fetch_html_with_cache(existing_event.url, existing_event)
                                 logger.info(f"Cached {len(html_content)} characters for existing event: {existing_event.name}")
                             except Exception as e:
                                 logger.warning(f"Failed to cache HTML for existing event {existing_event.name}: {str(e)}")
@@ -515,7 +524,7 @@ class ScrapingService:
         if cache_html:
             try:
                 logger.info(f"Fetching and caching HTML for event: {name}")
-                html_content = self.scraper._fetch_html_with_cache(normalized_url, event)
+                html_content = self.timataka_scraper._fetch_html_with_cache(normalized_url, event)
                 logger.info(f"Cached {len(html_content)} characters for event: {name}")
             except Exception as e:
                 logger.warning(f"Failed to cache HTML for event {name}: {str(e)}")
@@ -917,4 +926,4 @@ class ScrapingService:
     
     def get_supported_race_types(self) -> List[str]:
         """Get list of supported race types for scraping."""
-        return list(self.scraper.race_type_mapping.values())
+        return list(self.timataka_scraper.race_type_mapping.values())

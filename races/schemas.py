@@ -6,6 +6,7 @@ from decimal import Decimal
 
 class RunnerSchema(Schema):
     id: int
+    stable_id: Optional[str] = None
     name: str
     birth_year: Optional[int] = None
     gender: Optional[str] = None
@@ -16,6 +17,7 @@ class RunnerSchema(Schema):
 
 class RunnerSearchSchema(Schema):
     id: int
+    stable_id: Optional[str] = None
     name: str
     birth_year: Optional[int] = None
     gender: Optional[str] = None
@@ -44,6 +46,7 @@ class RaceHistorySchema(Schema):
 
 class RunnerDetailSchema(Schema):
     id: int
+    stable_id: Optional[str] = None
     name: str
     birth_year: Optional[int] = None
     gender: Optional[str] = None

@@ -117,6 +117,9 @@ docker-compose exec web python manage.py shell
 
 # View logs
 docker-compose logs -f web
+
+# Enhanced Django shell
+docker-compose exec web python manage.py shell_plus
 ```
 
 ### Database Access

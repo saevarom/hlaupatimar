@@ -54,7 +54,7 @@ class Command(BaseCommand):
             
             if dry_run:
                 # Just discover events without saving
-                scraper = service.scraper
+                scraper = service.timataka_scraper
                 discovered_events = scraper.discover_races_from_homepage(force_refresh=force_refresh)
                 
                 # Apply limit if specified

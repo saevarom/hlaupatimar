@@ -1208,13 +1208,14 @@ class TimatakaScraper:
             html_content = self._fetch_html_with_cache(results_url, race_obj, force_refresh)
             
             # Process the HTML content
-            return self.scrape_race_results(html_content, race_id)
+            race_date = race_obj.date if race_obj else None
+            return self.scrape_race_results(html_content, race_id, race_date=race_date)
             
         except Exception as e:
             logger.error(f"Error scraping race results from URL {results_url}: {str(e)}")
             raise TimatakaScrapingError(f"Failed to scrape race results: {str(e)}")
 
-    def scrape_race_results(self, html_content: str, race_id: int) -> Dict:
+    def scrape_race_results(self, html_content: str, race_id: int, race_date: Optional[datetime] = None) -> Dict:
         """
         Scrape race results from a Timataka.net results page.
         
@@ -1243,7 +1244,7 @@ class TimatakaScraper:
             headers = self._extract_table_headers(results_table)
             
             # Extract all result rows
-            results = self._extract_result_rows(results_table, headers)
+            results = self._extract_result_rows(results_table, headers, race_date=race_date)
             
             return {
                 'race_id': race_id,
@@ -1331,7 +1332,7 @@ class TimatakaScraper:
                         headers.append(header_text if header_text else 'unknown')
         return headers
     
-    def _extract_result_rows(self, table: BeautifulSoup, headers: List[str]) -> List[Dict]:
+    def _extract_result_rows(self, table: BeautifulSoup, headers: List[str], race_date: Optional[datetime] = None) -> List[Dict]:
         """Extract all result rows from the table"""
         results = []
         tbody = table.find('tbody')
@@ -1356,7 +1357,7 @@ class TimatakaScraper:
                     elif header == 'name':
                         result_data['name'] = cell_text
                     elif header == 'year':
-                        result_data['year'] = self._parse_year_or_age(cell_text)
+                        result_data['year'] = self._parse_year_or_age(cell_text, race_date=race_date)
                     elif header == 'club':
                         result_data['club'] = cell_text
                     elif header == 'pace':
@@ -1386,7 +1387,7 @@ class TimatakaScraper:
         except ValueError:
             return None
     
-    def _parse_year_or_age(self, text: str) -> Optional[int]:
+    def _parse_year_or_age(self, text: str, race_date: Optional[datetime] = None) -> Optional[int]:
         """Parse birth year or age, converting age to birth year if needed"""
         if not text or text == '':
             return None
@@ -1397,9 +1398,8 @@ class TimatakaScraper:
                 return value
             elif 10 <= value <= 100:
                 # This looks like an age, convert to birth year
-                from datetime import datetime
-                current_year = datetime.now().year
-                return current_year - value
+                reference_year = race_date.year if race_date else datetime.now().year
+                return reference_year - value
         except ValueError:
             pass
         return None

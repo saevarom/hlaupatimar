@@ -147,7 +147,7 @@ class Command(BaseCommand):
             else:
                 # Just scrape without saving
                 scraper = TimatakaScraper()
-                results_data = scraper.scrape_race_results(html_content, race_id)
+                results_data = scraper.scrape_race_results(html_content, race_id, race_date=race.date)
                 
                 self.stdout.write(self.style.SUCCESS(
                     f'Successfully scraped {results_data["results_count"]} result(s)'

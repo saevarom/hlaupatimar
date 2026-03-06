@@ -249,6 +249,7 @@ def search_runners(
     q: Optional[str] = None,
     birth_year: Optional[int] = None,
     gender: Optional[str] = None,
+    stable_id: Optional[str] = None,
     limit: int = 20,
     offset: int = 0
 ):
@@ -270,14 +271,17 @@ def search_runners(
     ).filter(results__isnull=False).distinct()
     
     # Apply filters
-    if q:
-        queryset = queryset.filter(name__icontains=q)
-    
-    if birth_year:
-        queryset = queryset.filter(birth_year=birth_year)
-    
-    if gender and gender.upper() in ['M', 'F']:
-        queryset = queryset.filter(gender=gender.upper())
+    if stable_id:
+        queryset = queryset.filter(stable_id=stable_id)
+    else:
+        if q:
+            queryset = queryset.filter(name__icontains=q)
+        
+        if birth_year:
+            queryset = queryset.filter(birth_year=birth_year)
+        
+        if gender and gender.upper() in ['M', 'F']:
+            queryset = queryset.filter(gender=gender.upper())
     
     # Order by name for consistent results
     queryset = queryset.order_by('name', 'birth_year')
@@ -290,6 +294,7 @@ def search_runners(
     for runner in runners:
         result.append(RunnerSearchSchema(
             id=runner.id,
+            stable_id=runner.stable_id,
             name=runner.name,
             birth_year=runner.birth_year,
             gender=runner.gender,
@@ -301,7 +306,7 @@ def search_runners(
 
 
 @router.get("/runners/{runner_id}", response=RunnerDetailSchema)
-def get_runner_detail(request, runner_id: int):
+def get_runner_detail(request, runner_id: str):
     """
     Get detailed information about a specific runner including complete race history.
     
@@ -310,7 +315,10 @@ def get_runner_detail(request, runner_id: int):
     - Complete race history with results and splits
     - Ordered chronologically by race date
     """
-    runner = get_object_or_404(Runner, id=runner_id)
+    if runner_id.startswith("rnr_"):
+        runner = get_object_or_404(Runner, stable_id=runner_id)
+    else:
+        runner = get_object_or_404(Runner, id=int(runner_id))
     
     # Get race history summary using the model method
     race_history_data = runner.get_race_history_summary()
@@ -341,6 +349,7 @@ def get_runner_detail(request, runner_id: int):
     
     return RunnerDetailSchema(
         id=runner.id,
+        stable_id=runner.stable_id,
         name=runner.name,
         birth_year=runner.birth_year,
         gender=runner.gender,
