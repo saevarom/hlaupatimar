@@ -1,13 +1,14 @@
 from ninja import Router, File
 from ninja.files import UploadedFile
 from django.shortcuts import get_object_or_404
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Case, When, IntegerField
+from django.http import Http404
 from django.http import JsonResponse
-from typing import List, Optional
+from typing import Dict, List, Optional
 from datetime import date
 from django.utils import timezone
 
-from .models import Race, Result, Split, Runner
+from .models import Race, Result, Split, Runner, RunnerAlias
 from .schemas import (
     RaceSchema, RaceCreateSchema, RaceListFilterSchema,
     ResultSchema, ResultCreateSchema,
@@ -18,6 +19,114 @@ from .schemas import (
 from .services import ScrapingService, TimatakaScrapingError
 
 router = Router()
+
+
+def _resolve_runner_for_read(runner_identifier: str) -> Runner:
+    """
+    Resolve runner id/stable_id to canonical runner using runner alias mappings.
+    """
+    is_stable = runner_identifier.startswith("rnr_")
+
+    alias_queryset = RunnerAlias.objects.filter(is_active=True).select_related("canonical_runner")
+    alias = None
+    if is_stable:
+        alias = alias_queryset.filter(alias_stable_id=runner_identifier).first()
+    else:
+        try:
+            alias_runner_id = int(runner_identifier)
+        except (TypeError, ValueError):
+            alias_runner_id = None
+        alias = (
+            alias_queryset.filter(alias_runner_id=alias_runner_id).first()
+            if alias_runner_id is not None
+            else None
+        )
+    if alias and alias.canonical_runner_id:
+        return alias.canonical_runner
+
+    runner = None
+    if is_stable:
+        runner = Runner.objects.filter(stable_id=runner_identifier).first()
+    else:
+        try:
+            numeric_id = int(runner_identifier)
+        except (TypeError, ValueError):
+            numeric_id = None
+        if numeric_id is not None:
+            runner = Runner.objects.filter(id=numeric_id).first()
+
+    if runner:
+        source_alias = alias_queryset.filter(
+            Q(source_runner=runner)
+            | Q(alias_runner_id=runner.id)
+            | Q(alias_stable_id=runner.stable_id or ""),
+        ).first()
+        return source_alias.canonical_runner if source_alias else runner
+
+    raise Http404("Runner not found")
+
+
+def _get_profile_race_counts(runners: List[Runner]) -> Dict[int, int]:
+    """
+    Return accurate distinct race counts for canonical runners, including all active aliases.
+    """
+    if not runners:
+        return {}
+
+    canonical_ids = [runner.id for runner in runners]
+    profile_runner_ids_by_canonical = {runner_id: {runner_id} for runner_id in canonical_ids}
+
+    alias_rows = list(
+        RunnerAlias.objects.filter(
+            is_active=True,
+            canonical_runner_id__in=canonical_ids,
+        ).values(
+            "canonical_runner_id",
+            "source_runner_id",
+            "alias_runner_id",
+            "alias_stable_id",
+        )
+    )
+
+    stable_to_canonical_ids: Dict[str, set[int]] = {}
+    for alias in alias_rows:
+        canonical_id = alias["canonical_runner_id"]
+        source_runner_id = alias.get("source_runner_id")
+        alias_runner_id = alias.get("alias_runner_id")
+        alias_stable_id = alias.get("alias_stable_id")
+
+        if source_runner_id:
+            profile_runner_ids_by_canonical[canonical_id].add(source_runner_id)
+        if alias_runner_id:
+            profile_runner_ids_by_canonical[canonical_id].add(alias_runner_id)
+        if alias_stable_id:
+            stable_to_canonical_ids.setdefault(alias_stable_id, set()).add(canonical_id)
+
+    if stable_to_canonical_ids:
+        for runner_id, stable_id in Runner.objects.filter(
+            stable_id__in=list(stable_to_canonical_ids.keys())
+        ).values_list("id", "stable_id"):
+            for canonical_id in stable_to_canonical_ids.get(stable_id, ()):
+                profile_runner_ids_by_canonical[canonical_id].add(runner_id)
+
+    canonical_ids_by_runner_id: Dict[int, set[int]] = {}
+    all_profile_runner_ids = set()
+    for canonical_id, runner_ids in profile_runner_ids_by_canonical.items():
+        all_profile_runner_ids.update(runner_ids)
+        for runner_id in runner_ids:
+            canonical_ids_by_runner_id.setdefault(runner_id, set()).add(canonical_id)
+
+    race_ids_by_canonical = {runner_id: set() for runner_id in canonical_ids}
+    for runner_id, race_id in Result.objects.filter(
+        runner_id__in=all_profile_runner_ids
+    ).values_list("runner_id", "race_id").distinct():
+        for canonical_id in canonical_ids_by_runner_id.get(runner_id, ()):
+            race_ids_by_canonical[canonical_id].add(race_id)
+
+    return {
+        canonical_id: len(race_ids)
+        for canonical_id, race_ids in race_ids_by_canonical.items()
+    }
 
 
 @router.post("/scrape", response=ScrapingResultSchema)
@@ -335,13 +444,26 @@ def search_runners(
     # Limit the maximum number of results
     limit = min(limit, 100)
     
-    queryset = Runner.objects.annotate(
-        total_races=Count('results__race', distinct=True)
-    ).filter(total_races__gt=0)
+    alias_stable_subquery = RunnerAlias.objects.filter(is_active=True).values_list("alias_stable_id", flat=True)
+    alias_runner_id_subquery = RunnerAlias.objects.filter(
+        is_active=True,
+        alias_runner_id__isnull=False,
+    ).values_list("alias_runner_id", flat=True)
+    queryset = Runner.objects.exclude(
+        Q(source_aliases__is_active=True)
+        | Q(stable_id__in=alias_stable_subquery)
+        | Q(id__in=alias_runner_id_subquery)
+    ).filter(
+        Q(results__isnull=False) | Q(canonical_aliases__is_active=True)
+    ).distinct()
     
     # Apply filters
     if stable_id:
-        queryset = queryset.filter(stable_id=stable_id)
+        try:
+            canonical_runner = _resolve_runner_for_read(stable_id)
+        except Http404:
+            return []
+        queryset = queryset.filter(id=canonical_runner.id)
     else:
         if q:
             queryset = queryset.filter(name__icontains=q)
@@ -358,9 +480,14 @@ def search_runners(
     # Apply pagination
     runners = queryset[offset:offset + limit]
     
+    race_counts_by_runner_id = _get_profile_race_counts(list(runners))
+
     # Convert to schema format
     result = []
     for runner in runners:
+        total_races = race_counts_by_runner_id.get(runner.id, 0)
+        if total_races <= 0:
+            continue
         result.append(RunnerSearchSchema(
             id=runner.id,
             stable_id=runner.stable_id,
@@ -368,7 +495,7 @@ def search_runners(
             birth_year=runner.birth_year,
             gender=runner.gender,
             nationality=runner.nationality,
-            total_races=runner.total_races
+            total_races=total_races
         ))
     
     return result
@@ -384,10 +511,7 @@ def get_runner_detail(request, runner_id: str):
     - Complete race history with results and splits
     - Ordered chronologically by race date
     """
-    if runner_id.startswith("rnr_"):
-        runner = get_object_or_404(Runner, stable_id=runner_id)
-    else:
-        runner = get_object_or_404(Runner, id=int(runner_id))
+    runner = _resolve_runner_for_read(runner_id)
     
     # Get race history summary using the model method
     race_history_data = runner.get_race_history_summary()
@@ -445,26 +569,43 @@ def list_race_results_table(
     List race results in a frontend-friendly format with runner metadata.
     """
     race = get_object_or_404(Race, id=race_id)
-    queryset = race.results.select_related('runner').order_by('finish_time', 'id')
+    status_priority = Case(
+        When(status='finished', then=0),
+        default=1,
+        output_field=IntegerField(),
+    )
+    queryset = race.results.select_related('runner').order_by(status_priority, 'finish_time', 'id')
 
     if gender and gender.upper() in ['M', 'F']:
         queryset = queryset.filter(runner__gender=gender.upper())
     if status:
         queryset = queryset.filter(status=status)
 
+    page_results = list(queryset[offset:offset + limit])
+    runner_ids = [result.runner_id for result in page_results if result.runner_id]
+    alias_map = {
+        alias.source_runner_id: alias.canonical_runner
+        for alias in RunnerAlias.objects.filter(
+            source_runner_id__in=runner_ids,
+            is_active=True,
+        ).select_related("canonical_runner")
+    }
+
     rows = []
-    for position, result in enumerate(queryset[offset:offset + limit], start=offset + 1):
+    for position, result in enumerate(page_results, start=offset + 1):
         runner = result.runner
+        canonical_runner = alias_map.get(runner.id) if runner else None
+        display_runner = canonical_runner or runner
         rows.append(
             RaceResultRowSchema(
                 id=result.id,
                 race_id=race.id,
                 position=position,
-                runner_id=runner.id if runner else None,
-                runner_stable_id=runner.stable_id if runner else None,
-                runner_name=runner.name if runner else (result.participant_name or 'Óþekktur'),
-                gender=runner.gender if runner else None,
-                birth_year=runner.birth_year if runner else None,
+                runner_id=display_runner.id if display_runner else None,
+                runner_stable_id=display_runner.stable_id if display_runner else None,
+                runner_name=display_runner.name if display_runner else (result.participant_name or 'Óþekktur'),
+                gender=display_runner.gender if display_runner else None,
+                birth_year=display_runner.birth_year if display_runner else None,
                 bib_number=result.bib_number,
                 club=result.club or None,
                 finish_time=result.finish_time,

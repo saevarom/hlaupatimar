@@ -49,7 +49,9 @@ export function getRaceDetail(raceId) {
 export function getRaceResultsTable(raceId, options = {}) {
   return fetchJson(`/api/races/${encodeURIComponent(raceId)}/results-table`, {
     limit: options.limit ?? 500,
-    offset: options.offset ?? 0
+    offset: options.offset ?? 0,
+    gender: options.gender,
+    status: options.status
   });
 }
 

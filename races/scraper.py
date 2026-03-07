@@ -389,7 +389,6 @@ class TimatakaScraper:
                 (r'\bhálf(?:[- ]?maraþon)?\b|\bhalf(?:[- ]?marathon)?\b', 'half_marathon', 21.1),
                 (r'(?<![\d,.])10\s?km\b', '10k', 10.0),
                 (r'(?<![\d,.])5\s?km\b', '5k', 5.0),
-                (r'\bultra\b', 'ultra', 50.0),  # Default ultra distance
             ]
             
             found_distances = []
@@ -502,10 +501,11 @@ class TimatakaScraper:
                 ):
                     race_name = f"{normalized_main} - {normalized_context}"
 
+                type_hint_name = normalized_context or normalized_main
                 race_type = (
                     self._determine_race_type_from_distance(distance_km)
                     if distance_km > 0
-                    else self._determine_race_type_from_name(race_name)
+                    else self._determine_race_type_from_name(type_hint_name)
                 )
 
                 race_info = {
@@ -648,7 +648,6 @@ class TimatakaScraper:
             (r'\bmarathon\b|\bmaraþon\b', 42.2),
             (r'\b10\s?k\b', 10.0),
             (r'\b5\s?k\b', 5.0),
-            (r'\bultra\b', 50.0),  # Default ultra distance (standalone word only)
         ]
         
         for pattern, distance in distance_patterns:
@@ -658,6 +657,18 @@ class TimatakaScraper:
                     return distance(match)
                 else:
                     return distance
+
+        # Handle labels like "Austur Ultra 53" where km suffix is omitted.
+        # Exclude year-like values to avoid false positives (e.g. "Ultra 2025").
+        if 'ultra' in name_lower:
+            numeric_matches = re.findall(r'\b(\d{1,3}(?:[.,]\d+)?)\b', name_lower)
+            for token in numeric_matches:
+                try:
+                    value = float(token.replace(',', '.'))
+                except ValueError:
+                    continue
+                if 1.0 <= value <= 200.0:
+                    return value
         
         return 0.0  # Default if no distance found
 

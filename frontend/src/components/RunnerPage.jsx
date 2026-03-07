@@ -9,6 +9,15 @@ import {
 } from "../lib/trends";
 import { formatDuration, formatIsoDate, formatSecondsToDuration } from "../lib/time";
 
+const DISTANCE_FILTER_ORDER = {
+  "5k": 0,
+  "10k": 1,
+  half: 2,
+  marathon: 3,
+  ultra: 4,
+  other: 5
+};
+
 function birtaKyn(gender) {
   if (gender === "F") {
     return "Kona";
@@ -24,16 +33,31 @@ function birtaStodu(status) {
   if (normalized === "finished" || normalized === "lokid") {
     return "Lokið";
   }
-  if (normalized === "dnf") {
+  if (normalized === "dnf" || normalized === "did not finish" || normalized === "didnotfinish") {
     return "Hætti";
   }
-  if (normalized === "dns") {
+  if (normalized === "dns" || normalized === "did not start" || normalized === "didnotstart") {
     return "Mætti ekki";
   }
-  if (normalized === "dq" || normalized === "dsq") {
+  if (
+    normalized === "dq" ||
+    normalized === "dsq" ||
+    normalized === "disqualified"
+  ) {
     return "Ógilt";
   }
+  if (normalized === "needsconfirmation" || normalized === "needs confirmation") {
+    return "Óstaðfest";
+  }
   return status || "-";
+}
+
+function birtaTimaEfLokid(value, status) {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  if (normalized && normalized !== "finished" && normalized !== "lokid") {
+    return "-";
+  }
+  return formatDuration(value);
 }
 
 function RunnerMeta({ runner }) {
@@ -55,6 +79,7 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
   const [error, setError] = useState("");
   const [selectedSurface, setSelectedSurface] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState(null);
+  const [ultraOnly, setUltraOnly] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,8 +117,11 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
   }, [runner]);
 
   const surfaceOptions = useMemo(() => {
+    const visibleTrends = ultraOnly
+      ? trends.filter((trend) => trend.category.key === "ultra")
+      : trends;
     const countsBySurface = {};
-    trends.forEach((trend) => {
+    visibleTrends.forEach((trend) => {
       countsBySurface[trend.surface.key] =
         (countsBySurface[trend.surface.key] || 0) + trend.points.length;
     });
@@ -104,7 +132,7 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
         ...surface,
         raceCount: countsBySurface[surface.key]
       }));
-  }, [trends]);
+  }, [trends, ultraOnly]);
 
   useEffect(() => {
     if (!surfaceOptions.length) {
@@ -125,8 +153,18 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
     if (!selectedSurface) {
       return [];
     }
-    return trends.filter((trend) => trend.surface.key === selectedSurface);
-  }, [trends, selectedSurface]);
+    return trends
+      .filter((trend) => trend.surface.key === selectedSurface)
+      .filter((trend) => (ultraOnly ? trend.category.key === "ultra" : true))
+      .sort((a, b) => {
+        const aOrder = DISTANCE_FILTER_ORDER[a.category.key] ?? Number.MAX_SAFE_INTEGER;
+        const bOrder = DISTANCE_FILTER_ORDER[b.category.key] ?? Number.MAX_SAFE_INTEGER;
+        if (aOrder !== bOrder) {
+          return aOrder - bOrder;
+        }
+        return a.category.label.localeCompare(b.category.label, "is");
+      });
+  }, [trends, selectedSurface, ultraOnly]);
 
   useEffect(() => {
     if (!filteredTrends.length) {
@@ -135,7 +173,14 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
     }
     setSelectedCategory((current) => {
       const exists = filteredTrends.some((trend) => trend.category.key === current);
-      return exists ? current : filteredTrends[0].category.key;
+      if (exists) {
+        return current;
+      }
+
+      const trendWithMostResults = filteredTrends.reduce((best, trend) =>
+        trend.points.length > best.points.length ? trend : best
+      );
+      return trendWithMostResults.category.key;
     });
   }, [filteredTrends]);
 
@@ -150,11 +195,16 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
   );
 
   const allResults = useMemo(
-    () =>
-      [...(runner?.race_history ?? [])].sort(
+    () => {
+      const history = [...(runner?.race_history ?? [])];
+      const filteredHistory = ultraOnly
+        ? history.filter((race) => Number(race.distance_km) > 43.5)
+        : history;
+      return filteredHistory.sort(
         (a, b) => new Date(b.race_date).getTime() - new Date(a.race_date).getTime()
-      ),
-    [runner]
+      );
+    },
+    [runner, ultraOnly]
   );
 
   if (loading) {
@@ -187,6 +237,23 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
       </button>
 
       <RunnerMeta runner={runner} />
+
+      <div className="tabs enter-up">
+        <button
+          className={ultraOnly ? "tab" : "tab active"}
+          onClick={() => setUltraOnly(false)}
+          type="button"
+        >
+          <span>Öll hlaup</span>
+        </button>
+        <button
+          className={ultraOnly ? "tab active" : "tab"}
+          onClick={() => setUltraOnly(true)}
+          type="button"
+        >
+          <span>Aðeins ofurhlaup</span>
+        </button>
+      </div>
 
       <div className="stat-row enter-up">
         <article>
@@ -323,7 +390,7 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
                 </td>
                 <td>{normalizeSurfaceType(race.surface_type).label}</td>
                 <td>{race.distance_km ? `${race.distance_km} km` : "-"}</td>
-                <td className="time-col">{formatDuration(race.finish_time)}</td>
+                <td className="time-col">{birtaTimaEfLokid(race.finish_time, race.status)}</td>
                 <td>{birtaStodu(race.status)}</td>
               </tr>
             ))}

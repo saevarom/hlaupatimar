@@ -8,7 +8,7 @@ from django.db import transaction
 from django.utils import timezone
 from .scraper import TimatakaScraper, TimatakaScrapingError
 from .corsa_scraper import CorsaScraper, CorsaScrapingError
-from .models import Race, Runner, Result, Split, Event
+from .models import Race, Runner, RunnerAlias, Result, Split, Event
 
 logger = logging.getLogger(__name__)
 
@@ -118,13 +118,34 @@ class ScrapingService:
         """Save a single result to database"""
         # Normalize result data based on source
         normalized_data = self._normalize_result_data(result_data, race.source)
+        incoming_gender = gender[0].upper() if gender else normalized_data.get('gender', '')
         
         # Get or create runner
         runner = self._get_or_create_runner(
             normalized_data['name'], 
             normalized_data.get('year'),
-            gender[0].upper() if gender else normalized_data.get('gender', '')
+            incoming_gender
         )
+
+        # Corsa includes explicit participant gender; reconcile stale runner gender on conflict.
+        if (
+            race.source == 'corsa.is'
+            and incoming_gender in {'M', 'F'}
+            and runner.gender
+            and runner.gender != incoming_gender
+        ):
+            previous_gender = runner.gender
+            Runner.objects.filter(id=runner.id).update(
+                gender=incoming_gender,
+                updated_at=timezone.now(),
+            )
+            runner.gender = incoming_gender
+            logger.info(
+                "Updated runner gender from explicit corsa data: runner_id=%s %s -> %s",
+                runner.id,
+                previous_gender,
+                incoming_gender,
+            )
         
         # Create or get result (prevent duplicates for same runner in same race)
         result, result_created = Result.objects.get_or_create(
@@ -149,6 +170,12 @@ class ScrapingService:
                 updated = True
             if normalized_data.get('club', '') and not result.club:
                 result.club = normalized_data.get('club', '')
+                updated = True
+            if normalized_data.get('status') and result.status != normalized_data.get('status'):
+                result.status = normalized_data.get('status')
+                updated = True
+            if normalized_data.get('chip_time') and result.chip_time != normalized_data.get('chip_time'):
+                result.chip_time = normalized_data.get('chip_time')
                 updated = True
             if updated:
                 result.save()
@@ -179,27 +206,41 @@ class ScrapingService:
             Normalized result data dictionary
         """
         if source == 'corsa.is':
-            # Normalize Corsa data format
-            # Convert seconds to formatted time string if needed
-            finish_time = result_data.get('gun_time_seconds')
-            if finish_time and isinstance(finish_time, (int, float)):
-                # Convert seconds to HH:MM:SS format
-                hours = int(finish_time // 3600)
-                minutes = int((finish_time % 3600) // 60)
-                seconds = int(finish_time % 60)
-                finish_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-            else:
-                finish_time = result_data.get('finish_time', '')
-                
-            chip_time = result_data.get('net_time_seconds')
-            if chip_time and isinstance(chip_time, (int, float)):
-                # Convert seconds to HH:MM:SS format  
-                hours = int(chip_time // 3600)
-                minutes = int((chip_time % 3600) // 60)
-                seconds = int(chip_time % 60)
-                chip_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-            else:
-                chip_time = result_data.get('chip_time')
+            def _seconds_to_clock(value):
+                if not isinstance(value, (int, float)):
+                    return None
+                if value <= 0:
+                    return None
+                total_seconds = int(value)
+                hours = int(total_seconds // 3600)
+                minutes = int((total_seconds % 3600) // 60)
+                seconds = int(total_seconds % 60)
+                return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+            def _normalize_corsa_status(raw_status):
+                normalized = re.sub(r'[^a-z]', '', str(raw_status or '').lower())
+                if normalized in {'didnotfinish', 'dnf'}:
+                    return 'dnf'
+                if normalized in {'didnotstart', 'dns'}:
+                    return 'dns'
+                if normalized in {'disqualified', 'dq', 'dsq'}:
+                    return 'dq'
+                # Corsa "NeedsConfirmation" means unverified ranking, not DNF.
+                return 'finished'
+
+            normalized_status = _normalize_corsa_status(result_data.get('status'))
+
+            gun_seconds = result_data.get('gun_time_seconds')
+            chip_seconds = result_data.get('net_time_seconds')
+            finish_time = _seconds_to_clock(gun_seconds) or _seconds_to_clock(chip_seconds)
+            chip_time = _seconds_to_clock(chip_seconds) or result_data.get('chip_time')
+
+            if not finish_time:
+                # Non-finishers can still be stored with explicit status and zero duration.
+                if normalized_status in {'dnf', 'dns', 'dq'}:
+                    finish_time = "00:00:00"
+                else:
+                    raise ValueError(f"Missing finish time for result '{result_data.get('name', '')}'")
             
             # Convert gender to database format (single character)
             raw_gender = result_data.get('gender', '').lower()
@@ -220,7 +261,7 @@ class ScrapingService:
                 'finish_time': finish_time,
                 'chip_time': chip_time,
                 'time_behind': result_data.get('behind_time'),
-                'status': result_data.get('status', 'Finished').lower(),
+                'status': normalized_status,
                 'gender': gender_code,
                 'year': result_data.get('age'),  # Corsa might have age instead of birth year
                 'rank': result_data.get('rank_overall', result_data.get('rank', 0)),
@@ -251,7 +292,7 @@ class ScrapingService:
                 if gender and not existing_runner.gender:
                     existing_runner.gender = gender
                     existing_runner.save(update_fields=['gender', 'updated_at'])
-                return existing_runner
+                return existing_runner.get_canonical_runner()
         
         # Try to find existing runner by name and birth year
         if birth_year:
@@ -292,8 +333,8 @@ class ScrapingService:
         
         if created:
             logger.info(f"Created new runner: {runner}")
-        
-        return runner
+
+        return runner.get_canonical_runner()
     
     def scrape_and_save_races(self, html_content: str, source_url: str = "", 
                               overwrite: bool = False) -> Dict[str, int]:
@@ -689,18 +730,51 @@ class ScrapingService:
         )
         
         return event
+
+    def _build_corsa_race_name(self, event_name: str, race_name: str) -> str:
+        """Build a descriptive Corsa race name by prefixing with event name when needed."""
+        clean_event = " ".join(str(event_name or "").split()).strip()
+        clean_race = " ".join(str(race_name or "").split()).strip()
+
+        if not clean_race:
+            return clean_event or "Corsa Race"
+        if not clean_event:
+            return clean_race
+
+        event_folded = clean_event.casefold()
+        race_folded = clean_race.casefold()
+
+        if race_folded == event_folded:
+            return clean_race
+        if race_folded.startswith(f"{event_folded} - "):
+            return clean_race
+        if event_folded in race_folded:
+            return clean_race
+
+        return f"{clean_event} - {clean_race}"
     
     def _create_or_update_corsa_race(self, event: Event, race_info: Dict, overwrite: bool = False):
         """Create or update a Race record from Corsa race information"""
-        # Check if race already exists
-        existing_race = Race.objects.filter(
-            event=event,
-            name=race_info['name'],
-            source='corsa.is'
-        ).first()
+        results_url = race_info.get('url')
+        race_name = self._build_corsa_race_name(event.name, race_info.get('name', ''))
+
+        # Check if race already exists (prefer stable URL match over name match).
+        existing_race = None
+        if results_url:
+            existing_race = Race.objects.filter(
+                event=event,
+                results_url=results_url,
+                source='corsa.is'
+            ).first()
+        if not existing_race:
+            existing_race = Race.objects.filter(
+                event=event,
+                name=race_name,
+                source='corsa.is'
+            ).first()
         
         if existing_race and not overwrite:
-            logger.debug(f"Race already exists: {race_info['name']}")
+            logger.debug(f"Race already exists: {race_name}")
             return existing_race
         
         # Extract location from event name (rough estimate)
@@ -710,15 +784,26 @@ class ScrapingService:
         elif 'laugavegur' in event.name.lower():
             location = "Laugavegur"
         
+        distance_km = race_info.get('distance_km')
+        if not distance_km:
+            distance_defaults = {
+                'marathon': 42.2,
+                'half_marathon': 21.1,
+                '10k': 10.0,
+                '5k': 5.0,
+                'ultra': 50.0,
+            }
+            distance_km = distance_defaults.get(race_info.get('race_type'), 1.0)
+
         race_data = {
             'event': event,
-            'name': race_info['name'],
+            'name': race_name,
             'race_type': race_info['race_type'],
             'date': event.date,
             'location': location,
-            'distance_km': race_info.get('distance_km') or 1.0,  # Ensure we have a valid distance
-            'results_url': race_info['url'],
-            'source_url': race_info['url'],
+            'distance_km': distance_km,
+            'results_url': results_url,
+            'source_url': results_url,
             'source': 'corsa.is',
         }
         
@@ -728,12 +813,12 @@ class ScrapingService:
                 if key != 'event':  # Don't update the event field
                     setattr(existing_race, key, value)
             existing_race.save()
-            logger.info(f"Updated race: {race_info['name']}")
+            logger.info(f"Updated race: {race_name}")
             return existing_race
         else:
             # Create new race
             race = Race.objects.create(**race_data)
-            logger.info(f"Created race: {race_info['name']} ({race.race_type})")
+            logger.info(f"Created race: {race_name} ({race.race_type})")
             return race
 
     def process_events_and_extract_races(self, event_ids: List[int] = None, limit: int = None, force_refresh: bool = False) -> Dict[str, int]:

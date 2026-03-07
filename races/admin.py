@@ -1,5 +1,14 @@
 from django.contrib import admin
-from .models import Event, Race, RaceDistanceKeyword, RaceSurfaceKeyword, Result, Runner, Split
+from .models import (
+    Event,
+    Race,
+    RaceDistanceKeyword,
+    RaceSurfaceKeyword,
+    Result,
+    Runner,
+    RunnerAlias,
+    Split,
+)
 
 
 @admin.register(Runner)
@@ -8,6 +17,21 @@ class RunnerAdmin(admin.ModelAdmin):
     list_filter = ['gender', 'nationality', 'birth_year']
     search_fields = ['name']
     ordering = ['name']
+
+
+@admin.register(RunnerAlias)
+class RunnerAliasAdmin(admin.ModelAdmin):
+    list_display = [
+        'alias_stable_id',
+        'alias_runner_id',
+        'source_runner',
+        'canonical_runner',
+        'is_active',
+        'updated_at',
+    ]
+    list_filter = ['is_active']
+    search_fields = ['alias_stable_id', 'source_runner__name', 'canonical_runner__name']
+    ordering = ['alias_stable_id']
 
 
 @admin.register(Event)

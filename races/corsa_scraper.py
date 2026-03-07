@@ -2,6 +2,7 @@ import re
 import requests
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
+from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from dateutil.parser import parse as parse_date
 from django.utils import timezone
@@ -31,22 +32,10 @@ class CorsaScraper:
         self.results_url = "https://www.corsa.is/results"
         self.race_type_mapping = {
             'marathon': 'marathon',
-            '42.2': 'marathon',
-            '42,2': 'marathon',
             'half marathon': 'half_marathon',
-            '21.1': 'half_marathon',  
-            '21,1': 'half_marathon',
-            '10k': '10k',
-            '10 k': '10k',
-            '10': '10k',
-            '5k': '5k',
-            '5 k': '5k',
-            '5': '5k',
             'fun run': 'other',
             'skemmtiskokk': 'other',  # Icelandic for fun run
             'ultra': 'ultra',
-            '55k': 'ultra',
-            '55': 'ultra',
         }
 
     def _fetch_html_with_cache(self, url: str, cache_obj=None, force_refresh: bool = False) -> str:
@@ -144,8 +133,8 @@ class CorsaScraper:
             soup = BeautifulSoup(html_content, 'lxml')
             events = []
             
-            # Find all CategoryList containers - these represent events
-            event_containers = soup.find_all('div', class_='CategoryList_list__container__uZS0Q')
+            # Match CSS module classes by stable fragments instead of full hashed names.
+            event_containers = soup.select('div[class*="CategoryList"][class*="list__container"]')
             
             for container in event_containers:
                 event_data = self._extract_event_from_container(container)
@@ -170,8 +159,8 @@ class CorsaScraper:
             Dictionary with event information or None if extraction fails
         """
         try:
-            # Get event name from title
-            title_elem = container.find('div', class_='CategoryList_list__title__3dNyD')
+            # Get event name from title (selector resilient to class hash changes).
+            title_elem = container.select_one('div[class*="CategoryList"][class*="list__title"]')
             if not title_elem:
                 return None
             
@@ -184,26 +173,31 @@ class CorsaScraper:
             # Try to extract date information from event name
             event_date = self._estimate_event_date(event_name, year)
             
-            # Get all race categories for this event
+            # Get all race categories for this event.
             races = []
-            race_containers = container.find_all('div', class_='CategoryList_item__IZ6jZ')
-            
-            for race_container in race_containers:
-                race_link = race_container.find('a')
-                if race_link and race_link.get('href'):
-                    race_name = race_link.get_text().strip()
-                    race_url = self.base_url + race_link.get('href')
-                    
-                    # Extract distance/type from race name
-                    race_type = self._classify_race_type(race_name)
-                    distance_km = self._extract_distance_from_name(race_name)
-                    
-                    races.append({
-                        'name': race_name,
-                        'url': race_url,
-                        'race_type': race_type,
-                        'distance_km': distance_km
-                    })
+            race_links = container.select('div[class*="CategoryList"][class*="item"] a[href]')
+            seen_urls = set()
+
+            for race_link in race_links:
+                href = (race_link.get('href') or '').strip()
+                if not href:
+                    continue
+
+                race_url = urljoin(self.base_url, href)
+                if race_url in seen_urls:
+                    continue
+                seen_urls.add(race_url)
+
+                race_name = race_link.get_text().strip()
+                race_type = self._classify_race_type(race_name)
+                distance_km = self._extract_distance_from_name(race_name)
+
+                races.append({
+                    'name': race_name,
+                    'url': race_url,
+                    'race_type': race_type,
+                    'distance_km': distance_km
+                })
             
             if not races:
                 return None
@@ -257,22 +251,20 @@ class CorsaScraper:
         """
         name_lower = race_name.lower()
         
-        # Order matters - check more specific patterns first
-        if 'half marathon' in name_lower or 'half-marathon' in name_lower:
-            return 'half_marathon'
-        elif 'marathon' in name_lower and 'half' not in name_lower:
-            return 'marathon'
-        elif '55k' in name_lower or '55 k' in name_lower:
-            return 'ultra'
-        elif 'ultra' in name_lower:
-            return 'ultra'
-        elif '21.1' in name_lower or '21,1' in name_lower:
-            return 'half_marathon'
-        elif '10k' in name_lower or '10 k' in name_lower or '10 km' in name_lower:
-            return '10k'
-        elif '5k' in name_lower or '5 k' in name_lower or '5 km' in name_lower:
-            return '5k'
-        elif 'fun run' in name_lower or 'skemmtiskokk' in name_lower:
+        distance_km = self._extract_distance_from_name(race_name)
+        if distance_km is not None:
+            if distance_km > 43.5:
+                return 'ultra'
+            if 41.0 <= distance_km <= 43.5:
+                return 'marathon'
+            if 20.0 <= distance_km <= 22.5:
+                return 'half_marathon'
+            if 9.0 <= distance_km <= 11.0:
+                return '10k'
+            if 4.0 <= distance_km <= 6.0:
+                return '5k'
+
+        if 'fun run' in name_lower or 'skemmtiskokk' in name_lower:
             return 'other'
         
         # Fallback to keyword matching
@@ -298,19 +290,17 @@ class CorsaScraper:
         if 'half marathon' in name_lower or 'half-marathon' in name_lower:
             return 21.1
         elif 'marathon' in name_lower and 'half' not in name_lower:
-            return 42.195
+            return 42.2
         elif '55k' in name_lower or '55 k' in name_lower:
             return 55.0
         elif '21.1' in name_lower or '21,1' in name_lower:
             return 21.1
         elif '42.2' in name_lower or '42,2' in name_lower:
-            return 42.195
+            return 42.2
         
         # Look for common distance patterns
         patterns = [
-            r'(\d+(?:\.\d+)?)\s*k(?:m)?',  # "10K", "21.1 k", "10km", etc.
-            r'(\d+(?:,\d+)?)\s*km',       # "10km", "21,1 km", etc.
-            r'\b(\d+)\s*k\b',             # Just numbers followed by K
+            r'(\d+(?:[.,]\d+)?)\s*(?:km|k)\b',
         ]
         
         for pattern in patterns:
@@ -327,7 +317,7 @@ class CorsaScraper:
         elif 'team' in name_lower or 'competition' in name_lower:
             return 55.0  # For team competitions, use the event's main distance
         
-        return 1.0  # Default minimum distance if nothing else matches
+        return None
 
     def scrape_race_results_from_url(self, race_url: str, race_obj=None, force_refresh: bool = False) -> List[Dict]:
         """
@@ -360,6 +350,11 @@ class CorsaScraper:
         We'll try to extract what we can from the initial HTML.
         """
         try:
+            results = self._extract_results_from_participants_payload(html_content)
+            if results:
+                logger.info(f"Extracted {len(results)} results from participants payload in {source_url}")
+                return results
+
             soup = BeautifulSoup(html_content, 'lxml')
             results = []
             
@@ -386,6 +381,102 @@ class CorsaScraper:
         except Exception as e:
             logger.error(f"Error extracting results from HTML: {str(e)}")
             return []
+
+    def _extract_results_from_participants_payload(self, html_content: str) -> List[Dict]:
+        """
+        Fast-path extractor for pages that embed a participants JSON array.
+        This avoids expensive regex scans on large Next.js payloads.
+        """
+        # Next.js chunks often contain escaped JSON fragments; normalize once.
+        normalized = re.sub(r'\\+"', '"', html_content)
+
+        marker_pos = normalized.find('"participants":[')
+        if marker_pos < 0:
+            return []
+
+        start = normalized.find('[', marker_pos)
+        if start < 0:
+            return []
+
+        depth = 0
+        in_string = False
+        escaped = False
+        end = -1
+
+        for idx in range(start, len(normalized)):
+            ch = normalized[idx]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == '\\':
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+
+            if ch == '"':
+                in_string = True
+            elif ch == '[':
+                depth += 1
+            elif ch == ']':
+                depth -= 1
+                if depth == 0:
+                    end = idx
+                    break
+
+        if end < 0:
+            return []
+
+        payload = normalized[start:end + 1]
+
+        try:
+            participants = json.loads(payload)
+        except json.JSONDecodeError:
+            return []
+
+        if not isinstance(participants, list):
+            return []
+
+        results = []
+        for participant in participants:
+            if not isinstance(participant, dict):
+                continue
+
+            gun_time_ms = participant.get('gunTime')
+            chip_time_ms = participant.get('chipTime')
+
+            try:
+                gun_time_seconds = (float(gun_time_ms) / 1000.0) if gun_time_ms is not None else None
+            except (TypeError, ValueError):
+                gun_time_seconds = None
+
+            try:
+                chip_time_seconds = (float(chip_time_ms) / 1000.0) if chip_time_ms is not None else None
+            except (TypeError, ValueError):
+                chip_time_seconds = None
+
+            rank_raw = participant.get('rankOverall')
+            try:
+                rank_overall = int(rank_raw)
+            except (TypeError, ValueError):
+                rank_overall = 0
+
+            result = {
+                'bib_number': str(participant.get('bib', '') or ''),
+                'name': str(participant.get('name', '') or ''),
+                'gender': str(participant.get('gender', '') or '').lower(),
+                'gun_time_seconds': gun_time_seconds,
+                'net_time_seconds': chip_time_seconds,
+                'rank_overall': rank_overall,
+                'participant_id': str(participant.get('id', '') or ''),
+                'status': participant.get('status'),
+                'progress': participant.get('progress'),
+            }
+
+            if result['name']:
+                results.append(result)
+
+        return results
 
     def _extract_results_from_script(self, script_content: str) -> List[Dict]:
         """

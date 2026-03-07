@@ -71,6 +71,42 @@ class Runner(models.Model):
         if self.birth_year:
             return f"{self.name} ({self.birth_year})"
         return self.name
+
+    def get_canonical_runner(self):
+        alias_query = RunnerAlias.objects.filter(is_active=True)
+        conditions = models.Q(source_runner=self) | models.Q(alias_runner_id=self.id)
+        if self.stable_id:
+            conditions |= models.Q(alias_stable_id=self.stable_id)
+        alias = alias_query.filter(conditions).select_related('canonical_runner').first()
+        return alias.canonical_runner if alias else self
+
+    def get_profile_runner_ids(self):
+        canonical = self.get_canonical_runner()
+        runner_ids = {canonical.id}
+        alias_rows = list(
+            RunnerAlias.objects.filter(
+                canonical_runner=canonical,
+                is_active=True,
+            ).values('source_runner_id', 'alias_runner_id', 'alias_stable_id')
+        )
+
+        alias_stable_ids = []
+        for alias in alias_rows:
+            source_runner_id = alias.get('source_runner_id')
+            alias_runner_id = alias.get('alias_runner_id')
+            alias_stable_id = alias.get('alias_stable_id')
+            if source_runner_id:
+                runner_ids.add(source_runner_id)
+            if alias_runner_id:
+                runner_ids.add(alias_runner_id)
+            if alias_stable_id:
+                alias_stable_ids.append(alias_stable_id)
+
+        if alias_stable_ids:
+            linked_ids = Runner.objects.filter(stable_id__in=alias_stable_ids).values_list('id', flat=True)
+            runner_ids.update(linked_ids)
+
+        return list(runner_ids)
     
     def get_race_history(self):
         """
@@ -80,8 +116,11 @@ class Runner(models.Model):
             QuerySet of Result objects with prefetched race, event, and splits data,
             ordered by race date (oldest first), then by race name for same-day races.
         """
-        return self.results.select_related(
-            'race__event'
+        return Result.objects.filter(
+            runner_id__in=self.get_profile_runner_ids()
+        ).select_related(
+            'race__event',
+            'runner',
         ).prefetch_related(
             'splits'
         ).order_by('race__date', 'race__name')
@@ -117,7 +156,7 @@ class Runner(models.Model):
                 'surface_type': result.race.surface_type,
                 'location': result.race.location,
                 'finish_time': result.finish_time,
-                'status': result.get_status_display(),
+                'status': result.status,
                 'bib_number': result.bib_number,
                 'club': result.club,
                 'splits': [
@@ -132,6 +171,52 @@ class Runner(models.Model):
             summary.append(race_data)
         
         return summary
+
+
+class RunnerAlias(models.Model):
+    """
+    Alias mapping to resolve old/duplicate runner identifiers to a canonical runner profile.
+    """
+
+    alias_stable_id = models.CharField(max_length=16, unique=True, db_index=True)
+    alias_runner_id = models.IntegerField(
+        null=True,
+        blank=True,
+        unique=True,
+        db_index=True,
+        help_text="Legacy runner numeric ID, if applicable.",
+    )
+    source_runner = models.ForeignKey(
+        Runner,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='source_aliases',
+        help_text="Linked duplicate profile (can be null after merge/delete).",
+    )
+    canonical_runner = models.ForeignKey(
+        Runner,
+        on_delete=models.CASCADE,
+        related_name='canonical_aliases',
+        help_text="Default profile this alias should resolve to.",
+    )
+    reason = models.CharField(max_length=255, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['alias_stable_id']
+        indexes = [
+            models.Index(fields=['canonical_runner', 'is_active']),
+            models.Index(fields=['source_runner', 'is_active']),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.alias_stable_id} -> "
+            f"{self.canonical_runner.stable_id or self.canonical_runner_id}"
+        )
 
 
 def _normalize_surface_text(value: str) -> str:

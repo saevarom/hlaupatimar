@@ -18,16 +18,31 @@ function birtaStodu(status) {
   if (normalized === "finished" || normalized === "lokid") {
     return "Lokið";
   }
-  if (normalized === "dnf") {
+  if (normalized === "dnf" || normalized === "did not finish" || normalized === "didnotfinish") {
     return "Hætti";
   }
-  if (normalized === "dns") {
+  if (normalized === "dns" || normalized === "did not start" || normalized === "didnotstart") {
     return "Mætti ekki";
   }
-  if (normalized === "dq" || normalized === "dsq") {
+  if (
+    normalized === "dq" ||
+    normalized === "dsq" ||
+    normalized === "disqualified"
+  ) {
     return "Ógilt";
   }
+  if (normalized === "needsconfirmation" || normalized === "needs confirmation") {
+    return "Óstaðfest";
+  }
   return status || "-";
+}
+
+function birtaTimaEfLokid(value, status) {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  if (normalized && normalized !== "finished" && normalized !== "lokid") {
+    return "-";
+  }
+  return formatDuration(value);
 }
 
 export default function RacePage({
@@ -41,7 +56,10 @@ export default function RacePage({
   const [results, setResults] = useState([]);
   const [eventRaces, setEventRaces] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [resultsLoading, setResultsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [resultsError, setResultsError] = useState("");
+  const [selectedGender, setSelectedGender] = useState("");
   const resultsTableRef = useRef(null);
   const lastScrollKeyRef = useRef("");
 
@@ -52,15 +70,13 @@ export default function RacePage({
       setLoading(true);
       setError("");
       try {
-        const [raceData, resultsData, eventRacesData] = await Promise.all([
+        const [raceData, eventRacesData] = await Promise.all([
           getRaceDetail(raceId),
-          getRaceResultsTable(raceId),
           getEventRaces(raceId)
         ]);
 
         if (!cancelled) {
           setRace(raceData);
-          setResults(resultsData);
           setEventRaces(eventRacesData);
         }
       } catch (loadError) {
@@ -79,6 +95,55 @@ export default function RacePage({
       cancelled = true;
     };
   }, [raceId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadResults() {
+      setResultsLoading(true);
+      setResultsError("");
+      try {
+        const pageSize = 500;
+        const maxRows = 20000;
+        let offset = 0;
+        let allRows = [];
+
+        while (offset < maxRows) {
+          const page = await getRaceResultsTable(raceId, {
+            gender: selectedGender || undefined,
+            limit: pageSize,
+            offset
+          });
+
+          allRows = [...allRows, ...page];
+
+          if (cancelled || page.length < pageSize) {
+            break;
+          }
+
+          offset += pageSize;
+        }
+
+        if (!cancelled) {
+          setResults(allRows);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setResults([]);
+          setResultsError(loadError.message || "Ekki tókst að sækja úrslit.");
+        }
+      } finally {
+        if (!cancelled) {
+          setResultsLoading(false);
+        }
+      }
+    }
+
+    loadResults();
+    return () => {
+      cancelled = true;
+    };
+  }, [raceId, selectedGender]);
 
   const focusedMatches = useMemo(() => {
     const focused = String(focusedRunnerId || "").trim();
@@ -205,7 +270,35 @@ export default function RacePage({
         </>
       ) : null}
 
+      <div className="tabs enter-up">
+        <button
+          className={selectedGender === "" ? "tab active" : "tab"}
+          onClick={() => setSelectedGender("")}
+          type="button"
+        >
+          <span>Allir</span>
+        </button>
+        <button
+          className={selectedGender === "F" ? "tab active" : "tab"}
+          onClick={() => setSelectedGender("F")}
+          type="button"
+        >
+          <span>Konur</span>
+        </button>
+        <button
+          className={selectedGender === "M" ? "tab active" : "tab"}
+          onClick={() => setSelectedGender("M")}
+          type="button"
+        >
+          <span>Karlar</span>
+        </button>
+      </div>
+
       <div className="results-table-wrap enter-up race-results-wrap" ref={resultsTableRef}>
+        {resultsLoading ? (
+          <p className="quiet">Hleð úrslit...</p>
+        ) : null}
+        {resultsError ? <p className="error">{resultsError}</p> : null}
         <table className="results-table">
           <thead>
             <tr>
@@ -242,8 +335,8 @@ export default function RacePage({
                   <td>{birtaKyn(row.gender)}</td>
                   <td>{row.birth_year ?? "-"}</td>
                   <td>{row.club || "-"}</td>
-                  <td className="time-col">{formatDuration(row.finish_time)}</td>
-                  <td className="time-col">{formatDuration(row.time_behind)}</td>
+                  <td className="time-col">{birtaTimaEfLokid(row.finish_time, row.status)}</td>
+                  <td className="time-col">{birtaTimaEfLokid(row.time_behind, row.status)}</td>
                   <td>{birtaStodu(row.status)}</td>
                 </tr>
               );
