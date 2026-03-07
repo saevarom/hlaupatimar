@@ -87,6 +87,20 @@ cp .env.server.example .env.server
 sudo docker compose -f docker-compose.server.yml up -d --build
 ```
 
+### One-command deploy script
+
+Use the included script from your local machine:
+
+```bash
+./deploy-server.sh
+```
+
+Optional push before deploy:
+
+```bash
+./deploy-server.sh --push
+```
+
 ## API Endpoints
 
 ### Races
