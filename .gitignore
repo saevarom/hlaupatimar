@@ -81,6 +81,7 @@ celerybeat-schedule
 
 # Environments
 .env
+.env.server
 .venv
 env/
 venv/
@@ -120,6 +121,7 @@ media/
 
 # Database
 *.db
+latest.dump
 
 # Frontend
 frontend/node_modules/

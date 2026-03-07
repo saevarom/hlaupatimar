@@ -71,6 +71,22 @@ This repository includes a Render Blueprint file at `render.yaml` for:
 
 After setup, every push to the connected branch triggers a deploy.
 
+## Deploy on Ubuntu Server (Docker Compose)
+
+This repository also includes a server-oriented stack:
+- `docker-compose.server.yml`
+- `frontend/Dockerfile.prod`
+- `frontend/nginx.prod.conf`
+- `.env.server.example`
+
+Quick deploy steps:
+
+```bash
+cp .env.server.example .env.server
+# edit .env.server secrets and hosts
+sudo docker compose -f docker-compose.server.yml up -d --build
+```
+
 ## API Endpoints
 
 ### Races

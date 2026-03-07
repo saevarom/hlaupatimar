@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-hlaupatimar}
+      POSTGRES_USER: ${POSTGRES_USER:-hlaupatimar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hlaupatimar} -d ${POSTGRES_DB:-hlaupatimar}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env.server
+    environment:
+      DEBUG: "False"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hlaupatimar}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-hlaupatimar}
+      ENABLE_DJANGO_EXTENSIONS: "False"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn hlaupatimar.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_BASE: /api
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
