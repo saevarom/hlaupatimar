@@ -1,7 +1,12 @@
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 async function fetchJson(path, params) {
-  const url = new URL(`${API_BASE}${path}`, window.location.origin);
+  const normalizedBase = String(API_BASE).replace(/\/+$/, "");
+  const normalizedPath =
+    path.startsWith("/api/") && normalizedBase.endsWith("/api")
+      ? path.replace(/^\/api/, "")
+      : path;
+  const url = new URL(`${normalizedBase}${normalizedPath}`, window.location.origin);
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== "") {
