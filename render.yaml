@@ -2,6 +2,7 @@ services:
   - type: web
     name: hlaupatimar-api
     runtime: python
+    region: frankfurt
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
     startCommand: python manage.py migrate && gunicorn hlaupatimar.wsgi:application --bind 0.0.0.0:$PORT --workers 3 --timeout 120
     healthCheckPath: /api/races/race-types
@@ -39,3 +40,4 @@ services:
 
 databases:
   - name: hlaupatimar-db
+    region: frankfurt
