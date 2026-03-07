@@ -55,6 +55,22 @@ docker-compose exec web python manage.py createsuperuser
 The API will be available at http://localhost:8002/api/
 The admin interface will be available at http://localhost:8002/admin/
 
+## Deploy on Render (Git-based)
+
+This repository includes a Render Blueprint file at `render.yaml` for:
+- Django API service (`hlaupatimar-api`)
+- Static React frontend (`hlaupatimar-frontend`)
+- Managed PostgreSQL database (`hlaupatimar-db`)
+
+### Steps
+
+1. Push this repository to GitHub.
+2. In Render, create a new **Blueprint** and select this repo.
+3. Render will provision services from `render.yaml`.
+4. Use `main` as your deploy branch.
+
+After setup, every push to the connected branch triggers a deploy.
+
 ## API Endpoints
 
 ### Races
