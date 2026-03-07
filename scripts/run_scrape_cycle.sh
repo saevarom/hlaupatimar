@@ -11,6 +11,7 @@ RESULT_LIMIT="${RESULT_LIMIT:-300}"
 DISCOVERY_TIMEOUT_SECONDS="${DISCOVERY_TIMEOUT_SECONDS:-900}"
 PROCESS_EVENTS_TIMEOUT_SECONDS="${PROCESS_EVENTS_TIMEOUT_SECONDS:-1200}"
 PROCESS_RESULTS_TIMEOUT_SECONDS="${PROCESS_RESULTS_TIMEOUT_SECONDS:-1800}"
+MANAGE_VERBOSITY="${MANAGE_VERBOSITY:-0}"
 
 cd "$APP_DIR"
 
@@ -22,17 +23,19 @@ COMPOSE=(sudo docker compose --env-file .env.server -f docker-compose.server.yml
 run_manage() {
   local timeout_seconds="$1"
   shift
+  local manage_verbosity="$MANAGE_VERBOSITY"
 
   "${COMPOSE[@]}" exec -T web sh -c '
     timeout_seconds="$1"
-    shift
+    manage_verbosity="$2"
+    shift 2
 
     if command -v timeout >/dev/null 2>&1; then
-      timeout --foreground "$timeout_seconds" python manage.py "$@"
+      timeout --foreground "$timeout_seconds" python manage.py "$@" --verbosity "$manage_verbosity"
     else
-      python manage.py "$@"
+      python manage.py "$@" --verbosity "$manage_verbosity"
     fi
-  ' sh "$timeout_seconds" "$@"
+  ' sh "$timeout_seconds" "$manage_verbosity" "$@"
 }
 
 run_discovery_timataka() {
