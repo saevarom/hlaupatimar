@@ -23,11 +23,16 @@ run_manage() {
   local timeout_seconds="$1"
   shift
 
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --foreground "$timeout_seconds" "${COMPOSE[@]}" exec -T web python manage.py "$@"
-  else
-    "${COMPOSE[@]}" exec -T web python manage.py "$@"
-  fi
+  "${COMPOSE[@]}" exec -T web sh -c '
+    timeout_seconds="$1"
+    shift
+
+    if command -v timeout >/dev/null 2>&1; then
+      timeout --foreground "$timeout_seconds" python manage.py "$@"
+    else
+      python manage.py "$@"
+    fi
+  ' sh "$timeout_seconds" "$@"
 }
 
 run_discovery_timataka() {
