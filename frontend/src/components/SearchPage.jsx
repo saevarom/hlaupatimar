@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getLatestEvents, searchRaces, searchRunners } from "../api";
-import { formatIsoDate } from "../lib/time";
+import { formatDuration, formatIsoDate } from "../lib/time";
 
 function birtaKyn(gender) {
   if (gender === "F") {
@@ -387,6 +387,7 @@ export default function SearchPage({
             <thead>
               <tr>
                 <th>Dagsetning</th>
+                <th className="time-col">Sigurtími</th>
                 <th>Viðburður</th>
                 <th>Fjöldi hlaupa</th>
                 <th>Staða</th>
@@ -396,6 +397,7 @@ export default function SearchPage({
               {upcomingEvents.map((event) => (
                 <tr key={event.id}>
                   <td>{formatIsoDate(event.date)}</td>
+                  <td className="time-col">{formatDuration(event.winning_time)}</td>
                   <td>{event.name}</td>
                   <td>{event.race_count ?? 0}</td>
                   <td>{event.has_results ? "Úrslit til" : "Úrslit ekki komin"}</td>
@@ -431,6 +433,7 @@ export default function SearchPage({
             <thead>
               <tr>
                 <th>Dagsetning</th>
+                <th className="time-col">Sigurtími</th>
                 <th>Hlaup</th>
                 <th>Vegalengd</th>
                 <th>Staður</th>
@@ -440,6 +443,7 @@ export default function SearchPage({
               {raceResults.map((race) => (
                 <tr key={race.id}>
                   <td>{formatIsoDate(race.date)}</td>
+                  <td className="time-col">{formatDuration(race.winning_time)}</td>
                   <td>
                     <button className="link-button" onClick={() => onOpenRace(race.id)} type="button">
                       {race.name}
@@ -465,6 +469,7 @@ export default function SearchPage({
               <thead>
                 <tr>
                   <th>Dagsetning</th>
+                  <th className="time-col">Sigurtími</th>
                   <th>Viðburður</th>
                   <th>Fjöldi hlaupa</th>
                   <th>Uppruni</th>
@@ -474,6 +479,7 @@ export default function SearchPage({
                 {recentEvents.map((event) => (
                   <tr key={event.id}>
                     <td>{formatIsoDate(event.date)}</td>
+                    <td className="time-col">{formatDuration(event.winning_time)}</td>
                     <td>
                       {event.has_results && event.preview_race_id ? (
                         <button

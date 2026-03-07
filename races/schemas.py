@@ -76,10 +76,67 @@ class RaceResultRowSchema(Schema):
     status: str
 
 
+class RaceTimeStatsSchema(Schema):
+    winner: Optional[timedelta] = None
+    average: Optional[timedelta] = None
+    p10: Optional[timedelta] = None
+    p25: Optional[timedelta] = None
+    p50: Optional[timedelta] = None
+    p75: Optional[timedelta] = None
+    p90: Optional[timedelta] = None
+
+
+class RaceTimeBucketSchema(Schema):
+    label: str
+    count: int
+    percentage: float
+
+
+class RaceGenderStatsSchema(Schema):
+    code: str
+    label: str
+    total: int
+    finished: int
+    dnf: int
+    dns: int
+    dq: int
+
+
+class RaceAgeBandStatsSchema(Schema):
+    label: str
+    total: int
+    finished: int
+    median_time: Optional[timedelta] = None
+    average_time: Optional[timedelta] = None
+
+
+class RaceClubStatsSchema(Schema):
+    club: str
+    finishers: int
+    median_time: Optional[timedelta] = None
+    average_time: Optional[timedelta] = None
+
+
+class RaceStatsSchema(Schema):
+    race_id: int
+    total_results: int
+    finished: int
+    dnf: int
+    dns: int
+    dq: int
+    finish_rate: float
+    time_stats: RaceTimeStatsSchema
+    sub_x_buckets: List[RaceTimeBucketSchema]
+    gender_breakdown: List[RaceGenderStatsSchema]
+    age_breakdown: List[RaceAgeBandStatsSchema]
+    club_leaderboard: List[RaceClubStatsSchema]
+
+
 class EventSummarySchema(Schema):
     id: int
     name: str
     date: date
+    winning_time: Optional[timedelta] = None
     source: str
     race_count: int
     result_count: int
@@ -94,6 +151,7 @@ class RaceSchema(Schema):
     description: Optional[str] = None
     race_type: str
     date: date
+    winning_time: Optional[timedelta] = None
     location: str
     distance_km: float
     surface_type: str = "unknown"

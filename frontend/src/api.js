@@ -55,6 +55,12 @@ export function getRaceResultsTable(raceId, options = {}) {
   });
 }
 
+export function getRaceStats(raceId, options = {}) {
+  return fetchJson(`/api/races/${encodeURIComponent(raceId)}/stats`, {
+    gender: options.gender
+  });
+}
+
 export function getEventRaces(raceId, options = {}) {
   return fetchJson(`/api/races/${encodeURIComponent(raceId)}/event-races`, {
     limit: options.limit ?? 20

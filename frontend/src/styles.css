@@ -219,6 +219,22 @@ a:hover {
   margin-bottom: 1rem;
 }
 
+.race-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.race-header .runner-meta {
+  min-width: 0;
+}
+
+.race-header .back-btn {
+  margin: 0;
+  justify-self: end;
+}
+
 .quiet {
   color: var(--muted);
 }
@@ -238,6 +254,370 @@ a:hover {
 .results-table {
   border-collapse: collapse;
   width: 100%;
+}
+
+.stats-table + .stats-table {
+  margin-top: 0.8rem;
+}
+
+.stats-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-top: 0.8rem;
+}
+
+.stats-chart-card {
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.stats-chart-card-wide {
+  grid-column: 1 / -1;
+}
+
+.stats-chart-card h4 {
+  margin: 0 0 0.65rem;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.stats-bars {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.stats-bar-row {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.stats-bar-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+}
+
+.stats-bar-meta span {
+  color: var(--muted);
+}
+
+.stats-bar-meta strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-bar-track {
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(116, 158, 200, 0.18);
+  overflow: hidden;
+}
+
+.stats-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7ec0ff 0%, #3f98e8 100%);
+}
+
+.stats-bar-fill-alt {
+  background: linear-gradient(90deg, #56bee0 0%, #2f82ba 100%);
+}
+
+.stats-bar-fill-muted {
+  background: linear-gradient(90deg, #98afc4 0%, #6f8da9 100%);
+}
+
+.time-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.65rem;
+}
+
+.time-metric-item {
+  border: 1px solid rgba(116, 158, 200, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 0.55rem 0.65rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.time-metric-item span {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-align: left;
+}
+
+.time-metric-item strong {
+  font-size: 1.55rem;
+  font-variant-numeric: tabular-nums;
+  font-family: "Manrope", sans-serif;
+  text-align: right;
+  margin-left: auto;
+  line-height: 1;
+}
+
+.percentile-track-wrap {
+  margin-top: 0.8rem;
+}
+
+.percentile-track-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.percentile-track-line {
+  position: relative;
+  height: 20px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(126, 192, 255, 0.18) 0%, rgba(111, 141, 169, 0.18) 100%);
+  border: 1px solid rgba(116, 158, 200, 0.22);
+  overflow: hidden;
+}
+
+.percentile-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.percentile-segment-0 {
+  background: rgba(78, 166, 255, 0.28);
+}
+
+.percentile-segment-1 {
+  background: rgba(86, 190, 224, 0.3);
+}
+
+.percentile-segment-2 {
+  background: rgba(111, 141, 169, 0.28);
+}
+
+.percentile-segment-3 {
+  background: rgba(116, 158, 200, 0.26);
+}
+
+.percentile-point {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.percentile-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #18598f;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.95);
+}
+
+.percentile-connector-svg {
+  width: 100%;
+  height: 32px;
+  display: block;
+  margin-top: 0.05rem;
+}
+
+.percentile-connector-svg line {
+  stroke: rgba(116, 158, 200, 0.75);
+  stroke-width: 0.8;
+}
+
+.percentile-label-layer {
+  position: relative;
+  height: 36px;
+  margin-top: 0.15rem;
+}
+
+.percentile-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  border: 1px solid rgba(116, 158, 200, 0.18);
+  border-radius: 8px;
+  padding: 0.2rem 0.35rem;
+  background: rgba(255, 255, 255, 0.78);
+  text-align: center;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.percentile-label small {
+  display: block;
+  font-size: 0.66rem;
+  color: var(--muted);
+  line-height: 1;
+  margin-bottom: 0.12rem;
+}
+
+.percentile-label em {
+  display: block;
+  font-style: normal;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.percentile-help-popup {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.4rem);
+  transform: translate(-50%, 6px);
+  width: max-content;
+  max-width: min(280px, 70vw);
+  padding: 0.42rem 0.52rem;
+  border-radius: 8px;
+  border: 1px solid rgba(116, 158, 200, 0.26);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 8px 20px rgba(24, 89, 143, 0.16);
+  color: var(--text);
+  font-size: 0.74rem;
+  line-height: 1.25;
+  white-space: normal;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  z-index: 1200;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.percentile-help-popup::after {
+  content: "";
+  position: absolute;
+  top: calc(100% - 1px);
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.98);
+  border-right: 1px solid rgba(116, 158, 200, 0.26);
+  border-bottom: 1px solid rgba(116, 158, 200, 0.26);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.percentile-label:hover .percentile-help-popup,
+.percentile-label:focus-visible .percentile-help-popup {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.percentile-label:focus-visible {
+  outline: 2px solid rgba(78, 166, 255, 0.35);
+  outline-offset: 2px;
+}
+
+.stats-details {
+  margin-top: 0.75rem;
+}
+
+.stats-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+  user-select: none;
+}
+
+.with-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  color: var(--accent);
+  line-height: 1;
+  cursor: help;
+}
+
+.info-tip-icon {
+  display: block;
+}
+
+.info-tip-popup {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.42rem);
+  transform: translate(-50%, 6px);
+  width: max-content;
+  max-width: min(320px, 70vw);
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid rgba(116, 158, 200, 0.26);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 8px 20px rgba(24, 89, 143, 0.16);
+  color: var(--text);
+  font-size: 0.75rem;
+  line-height: 1.25;
+  white-space: normal;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  z-index: 1200;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.info-tip-popup::after {
+  content: "";
+  position: absolute;
+  top: calc(100% - 1px);
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  background: rgba(255, 255, 255, 0.98);
+  border-right: 1px solid rgba(116, 158, 200, 0.26);
+  border-bottom: 1px solid rgba(116, 158, 200, 0.26);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.info-tip:hover .info-tip-popup,
+.info-tip:focus-visible .info-tip-popup {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.info-tip:focus-visible {
+  outline: 2px solid rgba(78, 166, 255, 0.35);
+  outline-offset: 1px;
+}
+
+.stats-details[open] summary {
+  margin-bottom: 0.55rem;
+}
+
+.stats-wrap {
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.stats-wrap .time-col,
+.stats-wrap .time-metric-item strong,
+.stats-wrap .percentile-label em {
+  font-family: "Share Tech Mono", "Roboto Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  letter-spacing: 0.02em;
+}
+
+.stats-wrap .results-table,
+.stats-wrap .results-table th,
+.stats-wrap .results-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .results-table th,
@@ -483,6 +863,10 @@ a:hover {
   .stat-row {
     grid-template-columns: 1fr;
   }
+
+  .stats-chart-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 560px) {
@@ -510,5 +894,9 @@ a:hover {
 
   .tab {
     justify-content: center;
+  }
+
+  .stats-chart-grid {
+    grid-template-columns: 1fr;
   }
 }
