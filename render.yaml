@@ -5,7 +5,7 @@ services:
     region: frankfurt
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
     startCommand: python manage.py migrate && gunicorn hlaupatimar.wsgi:application --bind 0.0.0.0:$PORT --workers 3 --timeout 120
-    healthCheckPath: /api/races/race-types
+    healthCheckPath: /api/races/scrape/supported-types
     envVars:
       - key: SECRET_KEY
         generateValue: true
