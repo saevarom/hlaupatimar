@@ -16,8 +16,11 @@ COMPOSE=(sudo docker compose --env-file .env.server -f docker-compose.server.yml
 # Ensure web service is up before running management commands.
 "${COMPOSE[@]}" up -d web >/dev/null
 
-run_discovery() {
+run_discovery_timataka() {
   "${COMPOSE[@]}" exec -T web python manage.py timataka_discover_events --limit "$DISCOVER_LIMIT"
+}
+
+run_discovery_corsa() {
   "${COMPOSE[@]}" exec -T web python manage.py corsa_discover_events --limit "$DISCOVER_LIMIT"
 }
 
@@ -27,19 +30,27 @@ run_processing() {
 }
 
 case "$MODE" in
+  discovery-timataka)
+    run_discovery_timataka
+    ;;
+  discovery-corsa)
+    run_discovery_corsa
+    ;;
   discovery)
-    run_discovery
+    run_discovery_timataka
+    run_discovery_corsa
     ;;
   process|processing)
     run_processing
     ;;
   full)
-    run_discovery
+    run_discovery_timataka
+    run_discovery_corsa
     run_processing
     ;;
   *)
     echo "Unknown mode: $MODE" >&2
-    echo "Usage: $0 [discovery|process|full]" >&2
+    echo "Usage: $0 [discovery|discovery-timataka|discovery-corsa|process|full]" >&2
     exit 1
     ;;
 esac
