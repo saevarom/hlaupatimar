@@ -30,9 +30,11 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'corsheaders',
-    'django_extensions',
     'races.apps.RacesConfig',  # Our main app for race data
 ]
+
+if config('ENABLE_DJANGO_EXTENSIONS', default=DEBUG, cast=bool):
+    INSTALLED_APPS.append('django_extensions')
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
