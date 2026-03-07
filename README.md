@@ -122,6 +122,24 @@ docker-compose logs -f web
 docker-compose exec web python manage.py shell_plus
 ```
 
+### Frontend (Runner Trends UI)
+
+A React frontend is available in `frontend/` for:
+- searching runners
+- opening a runner profile page
+- visualizing trends over time for 5K, 10K, half marathon, marathon, and other categories
+
+```bash
+# Start backend API
+docker-compose up web
+
+# Start frontend (in a separate terminal)
+docker-compose up frontend
+```
+
+The frontend uses `/api` and proxies to `http://localhost:8002` in development.
+Start the Django API first (`docker-compose up`) before opening the frontend.
+
 ### Database Access
 
 ```bash

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Race, Result, Split, Runner, Event
+from .models import Event, Race, RaceDistanceKeyword, RaceSurfaceKeyword, Result, Runner, Split
 
 
 @admin.register(Runner)
@@ -72,6 +72,24 @@ class RaceAdmin(admin.ModelAdmin):
             # Fallback to basic deletion info if there's an error
             return [], {}, set(), []
 
+
+
+@admin.register(RaceSurfaceKeyword)
+class RaceSurfaceKeywordAdmin(admin.ModelAdmin):
+    list_display = ['snippet', 'surface_type', 'priority', 'is_active', 'updated_at']
+    list_filter = ['surface_type', 'is_active']
+    search_fields = ['snippet', 'notes']
+    ordering = ['priority', 'snippet']
+    readonly_fields = ['normalized_snippet', 'created_at', 'updated_at']
+
+
+@admin.register(RaceDistanceKeyword)
+class RaceDistanceKeywordAdmin(admin.ModelAdmin):
+    list_display = ['snippet', 'distance_km', 'priority', 'is_active', 'updated_at']
+    list_filter = ['is_active']
+    search_fields = ['snippet', 'notes']
+    ordering = ['priority', 'snippet']
+    readonly_fields = ['normalized_snippet', 'created_at', 'updated_at']
 
 
 class RelatedFieldDropdownFilter(admin.SimpleListFilter):

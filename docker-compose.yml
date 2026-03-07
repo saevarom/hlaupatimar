@@ -17,3 +17,21 @@ services:
     command: >
       sh -c "python manage.py migrate &&
              python manage.py runserver 0.0.0.0:8000"
+
+  frontend:
+    image: node:20-alpine
+    restart: unless-stopped
+    working_dir: /app/frontend
+    environment:
+      - VITE_PROXY_TARGET=http://web:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - frontend_node_modules:/app/frontend/node_modules
+    command: >
+      sh -c "if [ ! -d node_modules ] || [ -z \"$(ls -A node_modules 2>/dev/null)\" ]; then npm install; fi &&
+             npm run dev -- --host 0.0.0.0 --port 3000"
+
+volumes:
+  frontend_node_modules:

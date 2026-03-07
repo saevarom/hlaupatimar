@@ -32,10 +32,12 @@ class SplitDetailSchema(Schema):
 
 
 class RaceHistorySchema(Schema):
+    race_id: int
     event_name: str
     race_name: str
     race_date: date
     distance_km: float
+    surface_type: str = "unknown"
     location: str
     finish_time: timedelta
     status: str
@@ -57,6 +59,35 @@ class RunnerDetailSchema(Schema):
     race_history: List[RaceHistorySchema]
 
 
+class RaceResultRowSchema(Schema):
+    id: int
+    race_id: int
+    position: int
+    runner_id: Optional[int] = None
+    runner_stable_id: Optional[str] = None
+    runner_name: str
+    gender: Optional[str] = None
+    birth_year: Optional[int] = None
+    bib_number: Optional[str] = None
+    club: Optional[str] = None
+    finish_time: timedelta
+    chip_time: Optional[timedelta] = None
+    time_behind: Optional[timedelta] = None
+    status: str
+
+
+class EventSummarySchema(Schema):
+    id: int
+    name: str
+    date: date
+    source: str
+    race_count: int
+    result_count: int
+    has_results: bool
+    is_upcoming: bool
+    preview_race_id: Optional[int] = None
+
+
 class RaceSchema(Schema):
     id: int
     name: str
@@ -65,6 +96,7 @@ class RaceSchema(Schema):
     date: date
     location: str
     distance_km: float
+    surface_type: str = "unknown"
     elevation_gain_m: int = 0
     max_participants: Optional[int] = None
     registration_url: Optional[str] = None
@@ -85,6 +117,7 @@ class RaceCreateSchema(Schema):
     date: date
     location: str
     distance_km: float
+    surface_type: Optional[str] = None
     elevation_gain_m: int = 0
     max_participants: Optional[int] = None
     registration_url: Optional[str] = None

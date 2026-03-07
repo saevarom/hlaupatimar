@@ -1,9 +1,11 @@
 from typing import List, Dict, Optional
 import logging
 from datetime import datetime
+import re
 import requests
 from bs4 import BeautifulSoup
 from django.db import transaction
+from django.utils import timezone
 from .scraper import TimatakaScraper, TimatakaScrapingError
 from .corsa_scraper import CorsaScraper, CorsaScrapingError
 from .models import Race, Runner, Result, Split, Event
@@ -744,11 +746,12 @@ class ScrapingService:
             force_refresh: If True, bypass cache and fetch HTML from web
             
         Returns:
-            Dict with counts: {'processed': X, 'races_created': Y, 'errors': Z}
+            Dict with counts: {'processed': X, 'races_created': Y, 'races_updated': Z, 'errors': W}
         """
         result = {
             'processed': 0,
             'races_created': 0,
+            'races_updated': 0,
             'errors': 0
         }
         
@@ -771,10 +774,11 @@ class ScrapingService:
                     
                     # Update event status to indicate processing has started
                     event.status = 'processing'
-                    event.last_processed = datetime.now()
+                    event.last_processed = timezone.now()
                     event.save()
                     
                     races_created_count = 0
+                    races_updated_count = 0
                     
                     # Handle different sources differently
                     if event.source == 'corsa.is':
@@ -797,9 +801,13 @@ class ScrapingService:
                         with transaction.atomic():
                             for race_data in races_data:
                                 try:
-                                    race = self._create_race_from_event_data(race_data, event)
-                                    races_created_count += 1
-                                    logger.debug(f"Created race: {race.name}")
+                                    race, created = self._create_race_from_event_data(race_data, event)
+                                    if created:
+                                        races_created_count += 1
+                                        logger.debug(f"Created race: {race.name}")
+                                    else:
+                                        races_updated_count += 1
+                                        logger.debug(f"Updated race: {race.name}")
                                 except Exception as e:
                                     logger.error(f"Error creating race from data {race_data}: {str(e)}")
                                     result['errors'] += 1
@@ -810,7 +818,11 @@ class ScrapingService:
                     
                     result['processed'] += 1
                     result['races_created'] += races_created_count
-                    logger.info(f"Successfully processed event '{event.name}': {races_created_count} races created")
+                    result['races_updated'] += races_updated_count
+                    logger.info(
+                        f"Successfully processed event '{event.name}': "
+                        f"{races_created_count} races created, {races_updated_count} races updated"
+                    )
                     
                 except Exception as e:
                     # Mark event as error and continue with next event
@@ -826,8 +838,58 @@ class ScrapingService:
             logger.error(f"Unexpected error in event processing: {str(e)}")
             raise TimatakaScrapingError(f"Service error: {str(e)}")
     
-    def _create_race_from_event_data(self, race_data: Dict, event: Event) -> Race:
-        """Create a Race object from scraped race data and link it to an Event"""
+    def _extract_race_id_from_url(self, url: str) -> Optional[str]:
+        """Extract `race=<id>` from a results/source URL."""
+        if not url:
+            return None
+        match = re.search(r'(?:\?|&)race=(\d+)(?:&|$)', url)
+        if not match:
+            return None
+        return match.group(1)
+
+    def _find_existing_race_for_event(
+        self,
+        event: Event,
+        name: str,
+        date,
+        results_url: str,
+        source_url: str,
+    ) -> Optional[Race]:
+        """Find the best existing Race match for idempotent event reprocessing."""
+        existing_races = list(Race.objects.filter(event=event).order_by('id'))
+
+        incoming_race_id = (
+            self._extract_race_id_from_url(results_url)
+            or self._extract_race_id_from_url(source_url)
+        )
+        if incoming_race_id:
+            for race in existing_races:
+                existing_race_id = (
+                    self._extract_race_id_from_url(race.results_url)
+                    or self._extract_race_id_from_url(race.source_url)
+                )
+                if existing_race_id == incoming_race_id:
+                    return race
+
+        if results_url:
+            exact_url_match = next(
+                (race for race in existing_races if race.results_url == results_url),
+                None,
+            )
+            if exact_url_match:
+                return exact_url_match
+
+        return next(
+            (race for race in existing_races if race.name == name and race.date == date),
+            None,
+        )
+
+    def _create_race_from_event_data(self, race_data: Dict, event: Event) -> tuple[Race, bool]:
+        """Create or update a Race from scraped event data and link it to an Event.
+
+        Returns:
+            tuple[Race, bool]: (race, created)
+        """
         # Extract race information from the scraped data
         name = race_data.get('name', 'Unknown Race')
         race_type = race_data.get('race_type', 'other')
@@ -843,24 +905,49 @@ class ScrapingService:
         elif not date:
             # Use event date as fallback
             date = event.date
-        
-        # Create and save the race
+
+        source_url = race_data.get('source_url', event.url)
+        results_url = race_data.get('results_url', '')
+        description = race_data.get('description', f"Race from event: {event.name}")
+        currency = race_data.get('currency', 'ISK')
+
+        existing_race = self._find_existing_race_for_event(
+            event=event,
+            name=name,
+            date=date,
+            results_url=results_url,
+            source_url=source_url,
+        )
+        if existing_race:
+            existing_race.name = name
+            existing_race.description = description
+            existing_race.race_type = race_type
+            existing_race.date = date
+            existing_race.location = location
+            existing_race.distance_km = distance_km
+            existing_race.elevation_gain_m = elevation_gain_m
+            existing_race.organizer = organizer
+            existing_race.currency = currency
+            existing_race.source_url = source_url
+            existing_race.results_url = results_url
+            existing_race.save()
+            return existing_race, False
+
         race = Race.objects.create(
             event=event,
             name=name,
-            description=race_data.get('description', f"Race from event: {event.name}"),
+            description=description,
             race_type=race_type,
             date=date,
             location=location,
             distance_km=distance_km,
             elevation_gain_m=elevation_gain_m,
             organizer=organizer,
-            currency=race_data.get('currency', 'ISK'),
-            source_url=race_data.get('source_url', event.url),  # Use scraped source URL if available
-            results_url=race_data.get('results_url', ''),  # Set the results URL from scraped data
+            currency=currency,
+            source_url=source_url,
+            results_url=results_url,
         )
-        
-        return race
+        return race, True
     
     def _create_race_from_discovery(self, race_info: Dict) -> Race:
         """Create a Race object from discovered race information"""

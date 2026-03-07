@@ -1,8 +1,10 @@
 import base64
 import hashlib
 import re
+import unicodedata
 
 from django.db import models
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
 
 
@@ -10,6 +12,13 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 SOURCE_CHOICES = [
     ('timataka.net', 'Timataka.net'),
     ('corsa.is', 'Corsa.is'),
+]
+
+RACE_SURFACE_TYPES = [
+    ('road', 'Road'),
+    ('trail', 'Trail'),
+    ('mixed', 'Mixed'),
+    ('unknown', 'Unknown'),
 ]
 
 
@@ -100,10 +109,12 @@ class Runner(models.Model):
         
         for result in results:
             race_data = {
+                'race_id': result.race.id,
                 'event_name': result.race.event.name if result.race.event else 'Unknown Event',
                 'race_name': result.race.name,
                 'race_date': result.race.date,
                 'distance_km': result.race.distance_km,
+                'surface_type': result.race.surface_type,
                 'location': result.race.location,
                 'finish_time': result.finish_time,
                 'status': result.get_status_display(),
@@ -121,6 +132,109 @@ class Runner(models.Model):
             summary.append(race_data)
         
         return summary
+
+
+def _normalize_surface_text(value: str) -> str:
+    normalized = unicodedata.normalize('NFKD', (value or '').casefold())
+    return ''.join(char for char in normalized if not unicodedata.combining(char))
+
+
+class RaceSurfaceKeyword(models.Model):
+    """
+    Dictionary rule for race surface classification.
+
+    Example:
+    - snippet: "tindahlaupid"
+    - surface_type: "trail"
+    """
+
+    snippet = models.CharField(
+        max_length=120,
+        help_text="Word or text snippet to match against race name/description/location.",
+    )
+    normalized_snippet = models.CharField(max_length=120, unique=True, editable=False, db_index=True)
+    surface_type = models.CharField(max_length=20, choices=RACE_SURFACE_TYPES, db_index=True)
+    priority = models.PositiveIntegerField(
+        default=100,
+        help_text="Lower value means higher priority when multiple rules match.",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    notes = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['priority', 'normalized_snippet']
+        indexes = [
+            models.Index(fields=['is_active', 'priority']),
+            models.Index(fields=['surface_type']),
+        ]
+
+    @classmethod
+    def get_active_rules(cls) -> list[tuple[str, str]]:
+        return list(
+            cls.objects.filter(is_active=True)
+            .order_by('priority', 'id')
+            .values_list('normalized_snippet', 'surface_type')
+        )
+
+    def save(self, *args, **kwargs):
+        self.normalized_snippet = _normalize_surface_text(self.snippet).strip()
+        if not self.normalized_snippet:
+            raise ValidationError("snippet must contain at least one alphanumeric character")
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.snippet} -> {self.surface_type}"
+
+
+class RaceDistanceKeyword(models.Model):
+    """
+    Dictionary rule for race distance classification by name/description/location.
+
+    Example:
+    - snippet: "Powerade"
+    - distance_km: 10.0
+    """
+
+    snippet = models.CharField(
+        max_length=120,
+        help_text="Word or text snippet to match against race name/description/location.",
+    )
+    normalized_snippet = models.CharField(max_length=120, unique=True, editable=False, db_index=True)
+    distance_km = models.FloatField(validators=[MinValueValidator(0.1)])
+    priority = models.PositiveIntegerField(
+        default=100,
+        help_text="Lower value means higher priority when multiple rules match.",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    notes = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['priority', 'normalized_snippet']
+        indexes = [
+            models.Index(fields=['is_active', 'priority']),
+            models.Index(fields=['distance_km']),
+        ]
+
+    @classmethod
+    def get_active_rules(cls) -> list[tuple[str, float]]:
+        return list(
+            cls.objects.filter(is_active=True)
+            .order_by('priority', 'id')
+            .values_list('normalized_snippet', 'distance_km')
+        )
+
+    def save(self, *args, **kwargs):
+        self.normalized_snippet = _normalize_surface_text(self.snippet).strip()
+        if not self.normalized_snippet:
+            raise ValidationError("snippet must contain at least one alphanumeric character")
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.snippet} -> {self.distance_km:g} km"
 
 
 class Event(models.Model):
@@ -175,7 +289,7 @@ class Race(models.Model):
         ('ultra', 'Ultra Marathon'),
         ('other', 'Other'),
     ]
-    
+
     # Link to the event this race belongs to
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name='races', null=True, blank=True)
     
@@ -186,6 +300,7 @@ class Race(models.Model):
     location = models.CharField(max_length=100)
     distance_km = models.FloatField(validators=[MinValueValidator(0.1)])
     elevation_gain_m = models.IntegerField(default=0, validators=[MinValueValidator(0)])
+    surface_type = models.CharField(max_length=20, choices=RACE_SURFACE_TYPES, default='unknown', help_text="Road/trail classification", db_index=True)
     max_participants = models.IntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
     registration_url = models.URLField(blank=True)
     official_website = models.URLField(blank=True)
@@ -218,7 +333,156 @@ class Race(models.Model):
             models.Index(fields=['race_type']),
             models.Index(fields=['location']),
         ]
-    
+
+    @staticmethod
+    def infer_distance_from_rules(
+        name: str = '',
+        description: str = '',
+        location: str = '',
+        distance_rules: list[tuple[str, float]] | None = None,
+    ) -> float | None:
+        text = _normalize_surface_text(f"{name} {description} {location}")
+
+        if distance_rules is None:
+            try:
+                distance_rules = RaceDistanceKeyword.get_active_rules()
+            except Exception:
+                distance_rules = []
+
+        for snippet, distance_km in distance_rules:
+            if snippet and snippet in text:
+                return float(distance_km)
+        return None
+
+    @staticmethod
+    def infer_race_type_from_distance(distance_km: float, current_race_type: str = 'other') -> str:
+        distance = float(distance_km or 0.0)
+        current = (current_race_type or 'other').strip().lower()
+        if distance > 43.5:
+            return 'ultra'
+        if 41.0 <= distance <= 43.5:
+            return 'marathon'
+        if 20.0 <= distance <= 22.5:
+            return 'half_marathon'
+        if 9.0 <= distance <= 11.0:
+            return '10k'
+        if 4.0 <= distance <= 6.0:
+            return '5k'
+        return current or 'other'
+
+    @staticmethod
+    def infer_surface_type_from_rules(
+        name: str = '',
+        description: str = '',
+        location: str = '',
+        surface_rules: list[tuple[str, str]] | None = None,
+    ) -> str | None:
+        text = _normalize_surface_text(f"{name} {description} {location}")
+
+        if surface_rules is None:
+            try:
+                surface_rules = RaceSurfaceKeyword.get_active_rules()
+            except Exception:
+                surface_rules = []
+
+        for snippet, surface_type in surface_rules:
+            if snippet and snippet in text:
+                return surface_type
+        return None
+
+    @staticmethod
+    def infer_surface_type(
+        race_type: str,
+        name: str = '',
+        description: str = '',
+        location: str = '',
+        elevation_gain_m: int = 0,
+        distance_km: float = 0.0,
+        surface_rules: list[tuple[str, str]] | None = None,
+    ) -> str:
+        race_type_value = (race_type or '').strip().lower()
+        text = _normalize_surface_text(f"{name} {description} {location}")
+
+        matched_surface = Race.infer_surface_type_from_rules(
+            name=name,
+            description=description,
+            location=location,
+            surface_rules=surface_rules,
+        )
+        if matched_surface:
+            return matched_surface
+
+        trail_keywords = [
+            'trail',
+            'fjall',
+            'fell',
+            'stiga',
+            'stigur',
+            'utanvega',
+            'heidi',
+            'backyard',
+            'mountain',
+            'ultra',
+            'fjallahjola',
+            'torfaera',
+        ]
+        road_keywords = [
+            'gotu',
+            'road',
+            'street',
+            'city',
+            'malbik',
+            'hringur',
+            'mara',
+        ]
+
+        if any(keyword in text for keyword in trail_keywords):
+            return 'trail'
+        if any(keyword in text for keyword in road_keywords):
+            return 'road'
+
+        if race_type_value == 'trail':
+            return 'trail'
+        if race_type_value in {'5k', '10k', 'half_marathon', 'marathon'}:
+            return 'road'
+
+        distance = float(distance_km or 0.0)
+        elevation = float(elevation_gain_m or 0.0)
+        gain_per_km = (elevation / distance) if distance > 0 else 0.0
+
+        if gain_per_km >= 35:
+            return 'trail'
+        if gain_per_km >= 15:
+            return 'mixed'
+        if distance > 0:
+            return 'road'
+
+        return 'road'
+
+    def save(self, *args, **kwargs):
+        inferred_distance = self.infer_distance_from_rules(
+            name=self.name,
+            description=self.description,
+            location=self.location,
+        )
+        if inferred_distance and abs(float(self.distance_km or 0.0) - inferred_distance) > 1e-6:
+            self.distance_km = inferred_distance
+            self.race_type = self.infer_race_type_from_distance(
+                inferred_distance,
+                current_race_type=self.race_type,
+            )
+
+        if not self.surface_type or self.surface_type == 'unknown':
+            self.surface_type = self.infer_surface_type(
+                race_type=self.race_type,
+                name=self.name,
+                description=self.description,
+                location=self.location,
+                elevation_gain_m=self.elevation_gain_m,
+                distance_km=self.distance_km,
+            )
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.name} - {self.date}"
 

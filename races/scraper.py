@@ -341,22 +341,63 @@ class TimatakaScraper:
         # Pattern 1: Look for distance information in the page content
         content_text = soup.get_text().lower()
         
-        # Common race distances mentioned in Icelandic
-        distance_patterns = [
-            (r'maraþon|marathon', 'marathon', 42.195),
-            (r'hálf[- ]?maraþon|half[- ]?marathon', 'half_marathon', 21.0975),
-            (r'10\s?km|10km', '10k', 10.0),
-            (r'5\s?km|5km', '5k', 5.0),
-            (r'ultra', 'ultra', 50.0),  # Default ultra distance
-        ]
+        # Extract explicit km mentions first, including comma decimals.
+        explicit_distances = []
+        distance_matches = re.findall(r'(?<![\d,.])(\d+(?:[.,]\d+)?)\s?km\b', content_text, re.IGNORECASE)
+        for distance_match in distance_matches:
+            try:
+                distance_value = float(distance_match.replace(',', '.'))
+            except ValueError:
+                continue
+
+            if distance_value <= 0 or distance_value > 200:
+                continue
+
+            rounded_distance = round(distance_value, 3)
+            if rounded_distance not in explicit_distances:
+                explicit_distances.append(rounded_distance)
+
+        # If we found explicit distances, create separate races for each.
+        if explicit_distances:
+            for distance in explicit_distances:
+                race_type = self._determine_race_type_from_distance(distance)
+                distance_label = f"{distance:g} km"
+                
+                # Since event URLs are now normalized to results URLs at save time,
+                # we can use the source_url directly
+                results_url = source_url
+                
+                race_info = {
+                    'name': f"{main_race_name} - {distance_label}",
+                    'race_type': race_type,
+                    'date': self._extract_race_date_from_page(soup),
+                    'location': location,
+                    'distance_km': distance,
+                    'elevation_gain_m': 0,
+                    'organizer': 'Tímataka',
+                    'currency': 'ISK',
+                    'description': self._extract_race_description(soup),
+                    'source_url': source_url,
+                    'results_url': results_url
+                }
+                race_categories.append(race_info)
         
-        found_distances = []
-        for pattern, race_type, distance in distance_patterns:
-            if re.search(pattern, content_text):
-                found_distances.append((race_type, distance))
-        
-        # If we found specific distances, create separate races for each
-        if found_distances:
+        # Fall back to coarse keyword detection only when no explicit distances are present.
+        if not race_categories:
+            distance_patterns = [
+                (r'\bmaraþon\b|\bmarathon\b', 'marathon', 42.2),
+                (r'\bhálf(?:[- ]?maraþon)?\b|\bhalf(?:[- ]?marathon)?\b', 'half_marathon', 21.1),
+                (r'(?<![\d,.])10\s?km\b', '10k', 10.0),
+                (r'(?<![\d,.])5\s?km\b', '5k', 5.0),
+                (r'\bultra\b', 'ultra', 50.0),  # Default ultra distance
+            ]
+            
+            found_distances = []
+            for pattern, race_type, distance in distance_patterns:
+                if re.search(pattern, content_text):
+                    found_distances.append((race_type, distance))
+            
+            # If we found specific distances, create separate races for each
             for race_type, distance in found_distances:
                 # Since event URLs are now normalized to results URLs at save time,
                 # we can use the source_url directly
@@ -399,106 +440,84 @@ class TimatakaScraper:
         race_data = {}
         for link in race_links:
             href = link.get('href', '')
+            link_text = link.get_text().strip()
+            link_distance = self._extract_distance_from_name(link_text)
+            context_heading = link.find_previous(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+            context_name = " ".join(context_heading.get_text().split()) if context_heading else ""
+            context_distance = self._extract_distance_from_name(context_name) if context_name else 0.0
             
             # Extract race ID from URL
             race_match = re.search(r'race=(\d+)', href)
             if race_match:
                 race_id = race_match.group(1)
                 
-                # Prioritize "overall" category links, or ensure we have cat=overall
                 if race_id not in race_data:
-                    # First time seeing this race ID
-                    if 'cat=overall' in href:
-                        # Perfect - this is the overall results link
-                        race_data[race_id] = href
-                    elif 'cat=' not in href:
-                        # No category specified - add overall category
-                        race_data[race_id] = self._ensure_overall_category(href)
-                    else:
-                        # Has a category but not overall - store it for now
-                        race_data[race_id] = href
+                    race_data[race_id] = {
+                        'href': href,
+                        'distance_km': link_distance if link_distance > 0 else 0.0,
+                        'context_name': context_name,
+                    }
+                    if race_data[race_id]['distance_km'] <= 0 and context_distance > 0:
+                        race_data[race_id]['distance_km'] = context_distance
+                elif link_distance > 0 and race_data[race_id]['distance_km'] <= 0:
+                    race_data[race_id]['distance_km'] = link_distance
+                elif context_distance > 0 and race_data[race_id]['distance_km'] <= 0:
+                    race_data[race_id]['distance_km'] = context_distance
+
+                if not race_data[race_id].get('context_name') and context_name:
+                    race_data[race_id]['context_name'] = context_name
+
+                # Prioritize "overall" category links, or ensure we have cat=overall
+                if 'cat=overall' in href:
+                    # Perfect - this is the overall results link
+                    race_data[race_id]['href'] = href
+                elif 'cat=' not in href and 'cat=overall' not in race_data[race_id]['href']:
+                    # No category specified - add overall category
+                    race_data[race_id]['href'] = self._ensure_overall_category(href)
                 else:
-                    # We already have this race ID - prioritize overall
-                    if 'cat=overall' in href:
-                        race_data[race_id] = href
+                    # Has a category but not overall - keep current value
+                    pass
         
-        # For each unique race ID, find the corresponding race name and distance
+        # Build race entries per race ID using local context from links.
         base_date = self._extract_race_date_from_page(soup)
-        
-        # Look for headings that might describe the races
-        headings = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
-        
-        # Try to match race IDs with race descriptions
-        race_descriptions = {}
-        for heading in headings:
-            text = heading.get_text().strip()
-            
-            # Look for patterns like "5 tindar (35 km)" or similar
-            distance_match = re.search(r'(\d+\.?\d*)\s?(km|kílómetr)', text, re.IGNORECASE)
-            if distance_match and len(text) >= 4:  # Changed from > 5 to >= 4 to catch short distance headings like "12 km"
-                # This heading contains distance info - it's likely a race description
-                distance = float(distance_match.group(1))
-                race_descriptions[text] = distance
-        
-        # If we found race descriptions with distances, create races
-        if race_descriptions:
-            # We need to match race descriptions to race IDs
-            # For now, we'll iterate through both and try to match them by order
-            race_ids = list(race_data.keys())
-            descriptions = list(race_descriptions.items())
-            
-            for i, (description, distance) in enumerate(descriptions):
-                # Determine race type based on distance
-                race_type = self._determine_race_type_from_distance(distance)
-                
-                # Build results URL with race ID if available
-                results_url = source_url
-                if i < len(race_ids) and race_data:
-                    race_id = race_ids[i]
-                    href = race_data[race_id]
-                    
-                    # Ensure the href has cat=overall
-                    href = self._ensure_overall_category(href)
-                    
-                    # Build full results URL by appending the relative href
-                    base_url = source_url.rstrip('/')
-                    results_url = f"{base_url}/{href}"
-                
+        if race_data:
+            for race_entry in race_data.values():
+                href = self._ensure_overall_category(race_entry['href'])
+                base_url = source_url.rstrip('/')
+                results_url = f"{base_url}/{href}"
+
+                distance_km = race_entry.get('distance_km') or 0.0
+                context_name = (race_entry.get('context_name') or "").strip()
+                normalized_main = " ".join(main_race_name.split()).strip()
+                normalized_context = " ".join(context_name.split()).strip()
+                normalized_main_lower = normalized_main.lower()
+                normalized_context_lower = normalized_context.lower()
+
+                race_name = normalized_main
+                if (
+                    normalized_context
+                    and normalized_context_lower != normalized_main_lower
+                    and normalized_context_lower not in normalized_main_lower
+                    and normalized_main_lower not in normalized_context_lower
+                ):
+                    race_name = f"{normalized_main} - {normalized_context}"
+
+                race_type = (
+                    self._determine_race_type_from_distance(distance_km)
+                    if distance_km > 0
+                    else self._determine_race_type_from_name(race_name)
+                )
+
                 race_info = {
-                    'name': f"{main_race_name} - {description}",
+                    'name': race_name,
                     'race_type': race_type,
                     'date': base_date,
                     'location': location,
-                    'distance_km': distance,
+                    'distance_km': distance_km,
                     'elevation_gain_m': 0,
                     'organizer': 'Tímataka',
                     'currency': 'ISK',
-                    'description': f"Race description: {description}",
-                    'source_url': source_url,
-                    'results_url': results_url
-                }
-                race_categories.append(race_info)
-        
-        # If we couldn't extract specific race info but found race IDs, create generic races
-        elif race_data:
-            for race_id, href in race_data.items():
-                # Ensure the href has cat=overall
-                href = self._ensure_overall_category(href)
-                
-                # Build full results URL by appending the relative href
-                base_url = source_url.rstrip('/')
-                results_url = f"{base_url}/{href}"
-                
-                race_info = {
-                    'name': f"{main_race_name} - Race {race_id}",
-                    'race_type': 'other',
-                    'date': base_date,
-                    'location': location,
-                    'distance_km': 0.0,
-                    'elevation_gain_m': 0,
-                    'organizer': 'Tímataka',
-                    'currency': 'ISK',
-                    'description': f"Race with ID {race_id}",
+                    'description': f"Race context: {normalized_context or normalized_main}",
                     'source_url': source_url,
                     'results_url': results_url
                 }
@@ -508,19 +527,19 @@ class TimatakaScraper:
     
     def _determine_race_type_from_distance(self, distance_km: float) -> str:
         """Determine race type based on distance in kilometers"""
-        if distance_km >= 42:
+        if distance_km > 43.5:
+            return 'ultra'
+        if 41.0 <= distance_km <= 43.5:
             return 'marathon'
-        elif distance_km >= 21:
+        elif 20.0 <= distance_km <= 22.5:
             return 'half_marathon'
-        elif distance_km >= 15:
-            return 'other'  # Long distance but not quite half marathon
-        elif distance_km >= 9:
+        elif 9.0 <= distance_km <= 11.0:
             return '10k'
-        elif distance_km >= 4:
+        elif 4.0 <= distance_km <= 6.0:
             return '5k'
         else:
             return 'other'
-    
+
     def _ensure_overall_category(self, href: str) -> str:
         """Ensure that a race results href includes cat=overall parameter"""
         if 'cat=overall' in href:
@@ -597,10 +616,10 @@ class TimatakaScraper:
         name_lower = name.lower()
         
         type_mappings = {
-            'marathon': 'marathon',
-            'maraþon': 'marathon',
             'hálf': 'half_marathon',
             'half': 'half_marathon',
+            'marathon': 'marathon',
+            'maraþon': 'marathon',
             'ultra': 'ultra',
             '10k': '10k',
             '5k': '5k',
@@ -623,12 +642,13 @@ class TimatakaScraper:
         
         # Look for explicit distance mentions
         distance_patterns = [
-            (r'marathon|maraþon', 42.195),
-            (r'hálf|half', 21.0975),
-            (r'10\s?k', 10.0),
-            (r'5\s?k', 5.0),
-            (r'ultra', 50.0),  # Default ultra distance
-            (r'(\d+)\s?km', lambda m: float(m.group(1))),
+            # Support compact forms like "26K" as well as "26 km"
+            (r'(\d+(?:[.,]\d+)?)\s?(?:km|k)\b', lambda m: float(m.group(1).replace(',', '.'))),
+            (r'\bh[áa]lf(?:[-\s]?maraþon)?\b|\bhalf(?:[-\s]?marathon)?\b', 21.1),
+            (r'\bmarathon\b|\bmaraþon\b', 42.2),
+            (r'\b10\s?k\b', 10.0),
+            (r'\b5\s?k\b', 5.0),
+            (r'\bultra\b', 50.0),  # Default ultra distance (standalone word only)
         ]
         
         for pattern, distance in distance_patterns:
@@ -1091,14 +1111,28 @@ class TimatakaScraper:
             tuple: (distance_in_km, description)
         """
         # Pattern to match distance in parentheses
-        km_pattern = r'\((\d+(?:\.\d+)?)\s*km\)'
+        km_pattern = r'\((\d+(?:[.,]\d+)?)\s*km\s*\)'
         km_match = re.search(km_pattern, race_text, re.IGNORECASE)
         
         if km_match:
-            distance_km = float(km_match.group(1))
+            distance_km = float(km_match.group(1).replace(',', '.'))
             # Remove the km part to get description
-            description = re.sub(km_pattern, '', race_text).strip()
+            description = re.sub(km_pattern, '', race_text, flags=re.IGNORECASE).strip()
             return distance_km, description
+
+        # Also support non-parenthesized patterns like "4,2 km"
+        inline_km_pattern = r'\b(\d+(?:[.,]\d+)?)\s*km\b'
+        inline_km_match = re.search(inline_km_pattern, race_text, re.IGNORECASE)
+        if inline_km_match:
+            distance_km = float(inline_km_match.group(1).replace(',', '.'))
+            description = re.sub(
+                inline_km_pattern,
+                '',
+                race_text,
+                count=1,
+                flags=re.IGNORECASE,
+            ).strip(' -,:')
+            return distance_km, description or race_text
         
         # If no km found, try to infer from common patterns
         if 'marathon' in race_text.lower():
@@ -1118,9 +1152,13 @@ class TimatakaScraper:
                 return estimated_distance, race_text
         
         # Fallback: try to find any number that might be distance
-        number_match = re.search(r'(\d+(?:\.\d+)?)', race_text)
-        if number_match:
-            return float(number_match.group(1)), race_text
+        numbers = [
+            float(match.replace(',', '.'))
+            for match in re.findall(r'(\d+(?:[.,]\d+)?)', race_text)
+        ]
+        plausible_numbers = [number for number in numbers if number <= 200]
+        if plausible_numbers:
+            return max(plausible_numbers), race_text
         
         return 10.0, race_text  # Default fallback
     
@@ -1164,15 +1202,15 @@ class TimatakaScraper:
                 return race_type
         
         # Determine by distance
-        if distance_km >= 40:
+        if distance_km > 43.5:
+            return 'ultra'
+        if 41.0 <= distance_km <= 43.5:
             return 'marathon'
-        elif distance_km >= 20:
+        elif 20.0 <= distance_km <= 22.5:
             return 'half_marathon'
-        elif distance_km >= 15:
-            return 'other'
-        elif distance_km >= 9:
+        elif 9.0 <= distance_km <= 11.0:
             return '10k'
-        elif distance_km >= 4:
+        elif 4.0 <= distance_km <= 6.0:
             return '5k'
         else:
             return 'other'

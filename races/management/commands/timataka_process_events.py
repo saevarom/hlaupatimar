@@ -89,6 +89,7 @@ class Command(BaseCommand):
                     f"Event processing completed!\n"
                     f"  Events processed: {result['processed']}\n"
                     f"  Races created: {result['races_created']}\n"
+                    f"  Races updated: {result.get('races_updated', 0)}\n"
                     f"  Errors: {result['errors']}"
                 )
             )
