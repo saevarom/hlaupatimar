@@ -60,6 +60,36 @@ function birtaTimaEfLokid(value, status) {
   return formatDuration(value);
 }
 
+function birtaMillitimaLabel(split) {
+  const name = String(split?.name || "").trim() || "Millitími";
+  const distance = Number(split?.distance_km);
+  if (Number.isFinite(distance) && distance > 0) {
+    return `${name} (${distance} km)`;
+  }
+  return name;
+}
+
+function SplitsCell({ splits }) {
+  const items = Array.isArray(splits) ? splits : [];
+  if (!items.length) {
+    return "-";
+  }
+
+  return (
+    <details className="splits-details">
+      <summary>{items.length} millitímar</summary>
+      <ul>
+        {items.map((split, index) => (
+          <li key={`${split.name || "split"}-${split.distance_km || "na"}-${index}`}>
+            <span>{birtaMillitimaLabel(split)}</span>
+            <strong>{formatDuration(split.time)}</strong>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 function RunnerMeta({ runner }) {
   return (
     <div className="runner-meta">
@@ -207,6 +237,27 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
     [runner, ultraOnly]
   );
 
+  const splitsByRaceKey = useMemo(() => {
+    const map = new Map();
+    (runner?.race_history ?? []).forEach((race) => {
+      const fallbackKey = `${race.race_date || ""}|${race.race_name || ""}`;
+      if (race.race_id !== null && race.race_id !== undefined) {
+        map.set(`id:${race.race_id}`, race.splits ?? []);
+      }
+      if (!map.has(`fallback:${fallbackKey}`)) {
+        map.set(`fallback:${fallbackKey}`, race.splits ?? []);
+      }
+    });
+    return map;
+  }, [runner]);
+
+  const getSplitsForPoint = (point) => {
+    if (point?.raceId !== null && point?.raceId !== undefined) {
+      return splitsByRaceKey.get(`id:${point.raceId}`) ?? [];
+    }
+    return splitsByRaceKey.get(`fallback:${point?.date || ""}|${point?.raceName || ""}`) ?? [];
+  };
+
   if (loading) {
     return (
       <section className="panel">
@@ -324,6 +375,7 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
                 <th>Yfirborð</th>
                 <th>Vegalengd</th>
                 <th className="time-col">Tími</th>
+                <th>Millitímar</th>
                 <th>Staða</th>
               </tr>
             </thead>
@@ -350,6 +402,7 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
                     <td>{selectedTrend.surface.label}</td>
                     <td>{point.distanceKm ? `${point.distanceKm} km` : "-"}</td>
                     <td className="time-col">{formatSecondsToDuration(point.finishSeconds)}</td>
+                    <td><SplitsCell splits={getSplitsForPoint(point)} /></td>
                     <td>{birtaStodu(point.status)}</td>
                   </tr>
                 ))}
@@ -368,6 +421,7 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
               <th>Yfirborð</th>
               <th>Vegalengd</th>
               <th className="time-col">Tími</th>
+              <th>Millitímar</th>
               <th>Staða</th>
             </tr>
           </thead>
@@ -391,6 +445,7 @@ export default function RunnerPage({ runnerId, onBack, onOpenRace }) {
                 <td>{normalizeSurfaceType(race.surface_type).label}</td>
                 <td>{race.distance_km ? `${race.distance_km} km` : "-"}</td>
                 <td className="time-col">{birtaTimaEfLokid(race.finish_time, race.status)}</td>
+                <td><SplitsCell splits={race.splits} /></td>
                 <td>{birtaStodu(race.status)}</td>
               </tr>
             ))}

@@ -45,6 +45,36 @@ function birtaTimaEfLokid(value, status) {
   return formatDuration(value);
 }
 
+function birtaMillitimaLabel(split) {
+  const name = String(split?.name || "").trim() || "Millitími";
+  const distance = Number(split?.distance_km);
+  if (Number.isFinite(distance) && distance > 0) {
+    return `${name} (${distance} km)`;
+  }
+  return name;
+}
+
+function SplitsCell({ splits }) {
+  const items = Array.isArray(splits) ? splits : [];
+  if (!items.length) {
+    return "-";
+  }
+
+  return (
+    <details className="splits-details">
+      <summary>{items.length} millitímar</summary>
+      <ul>
+        {items.map((split, index) => (
+          <li key={`${split.name || "split"}-${split.distance_km || "na"}-${index}`}>
+            <span>{birtaMillitimaLabel(split)}</span>
+            <strong>{formatDuration(split.time)}</strong>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 function formatPercent(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "-";
@@ -734,6 +764,7 @@ export default function RacePage({
               <th>Félag</th>
               <th className="time-col">Tími</th>
               <th className="time-col">Á eftir</th>
+              <th>Millitímar</th>
               <th>Staða</th>
             </tr>
           </thead>
@@ -762,6 +793,7 @@ export default function RacePage({
                   <td>{row.club || "-"}</td>
                   <td className="time-col">{birtaTimaEfLokid(row.finish_time, row.status)}</td>
                   <td className="time-col">{birtaTimaEfLokid(row.time_behind, row.status)}</td>
+                  <td><SplitsCell splits={row.splits} /></td>
                   <td>{birtaStodu(row.status)}</td>
                 </tr>
               );

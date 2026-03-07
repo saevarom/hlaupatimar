@@ -889,7 +889,12 @@ def list_race_results_table(
         default=1,
         output_field=IntegerField(),
     )
-    queryset = race.results.select_related('runner').order_by(status_priority, 'finish_time', 'id')
+    queryset = (
+        race.results
+        .select_related('runner')
+        .prefetch_related('splits')
+        .order_by(status_priority, 'finish_time', 'id')
+    )
 
     if gender and gender.upper() in ['M', 'F']:
         queryset = queryset.filter(runner__gender=gender.upper())
@@ -926,6 +931,14 @@ def list_race_results_table(
                 finish_time=result.finish_time,
                 chip_time=result.chip_time,
                 time_behind=result.time_behind,
+                splits=[
+                    {
+                        "name": split.split_name,
+                        "distance_km": split.distance_km,
+                        "time": split.split_time,
+                    }
+                    for split in result.splits.all()
+                ],
                 status=result.status,
             )
         )

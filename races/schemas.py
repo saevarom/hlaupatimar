@@ -73,6 +73,7 @@ class RaceResultRowSchema(Schema):
     finish_time: timedelta
     chip_time: Optional[timedelta] = None
     time_behind: Optional[timedelta] = None
+    splits: List[SplitDetailSchema] = []
     status: str
 
 

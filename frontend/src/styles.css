@@ -737,6 +737,52 @@ a:hover {
   background: rgba(255, 255, 255, 0.2);
 }
 
+.splits-details {
+  min-width: 180px;
+}
+
+.splits-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+  list-style: none;
+}
+
+.splits-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.splits-details summary::after {
+  content: " ▼";
+  font-size: 0.62rem;
+  vertical-align: middle;
+}
+
+.splits-details[open] summary::after {
+  content: " ▲";
+}
+
+.splits-details ul {
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.splits-details li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.55rem;
+  align-items: baseline;
+  font-size: 0.78rem;
+}
+
+.splits-details li strong {
+  font-family: "Share Tech Mono", "Roboto Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
 .trend-chart {
   margin: 1rem 0;
   border: 1px solid var(--stroke);
