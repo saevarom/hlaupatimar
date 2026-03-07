@@ -2,7 +2,6 @@ services:
   - type: web
     name: hlaupatimar-api
     runtime: python
-    plan: free
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
     startCommand: python manage.py migrate && gunicorn hlaupatimar.wsgi:application --bind 0.0.0.0:$PORT --workers 3 --timeout 120
     healthCheckPath: /api/races/race-types
@@ -25,7 +24,6 @@ services:
   - type: web
     name: hlaupatimar-frontend
     runtime: static
-    plan: free
     buildCommand: cd frontend && npm ci && npm run build
     staticPublishPath: frontend/dist
     routes:
@@ -41,4 +39,3 @@ services:
 
 databases:
   - name: hlaupatimar-db
-    plan: free
