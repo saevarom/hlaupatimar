@@ -352,8 +352,16 @@ class Command(BaseCommand):
             # Use the appropriate scraper based on race source
             service = ScrapingService()
             scraper = service.get_scraper(race.source if race else 'timataka.net')
-            
-            if self.cache_html and race:
+
+            # A single Race.cached_html cannot safely cache multiple category pages
+            # (e.g. cat=m and cat=f). Only use race-level cache for overall/no-category pages.
+            use_race_cache = (
+                self.cache_html
+                and race
+                and ('cat=' not in url or 'cat=overall' in url)
+            )
+
+            if use_race_cache:
                 html_content = scraper._fetch_html_with_cache(
                     url, 
                     cache_obj=race, 
