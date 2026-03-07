@@ -8,6 +8,9 @@ MODE="${1:-full}"
 DISCOVER_LIMIT="${DISCOVER_LIMIT:-200}"
 EVENT_LIMIT="${EVENT_LIMIT:-120}"
 RESULT_LIMIT="${RESULT_LIMIT:-300}"
+DISCOVERY_TIMEOUT_SECONDS="${DISCOVERY_TIMEOUT_SECONDS:-900}"
+PROCESS_EVENTS_TIMEOUT_SECONDS="${PROCESS_EVENTS_TIMEOUT_SECONDS:-1200}"
+PROCESS_RESULTS_TIMEOUT_SECONDS="${PROCESS_RESULTS_TIMEOUT_SECONDS:-1800}"
 
 cd "$APP_DIR"
 
@@ -16,17 +19,28 @@ COMPOSE=(sudo docker compose --env-file .env.server -f docker-compose.server.yml
 # Ensure web service is up before running management commands.
 "${COMPOSE[@]}" up -d web >/dev/null
 
+run_manage() {
+  local timeout_seconds="$1"
+  shift
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --foreground "$timeout_seconds" "${COMPOSE[@]}" exec -T web python manage.py "$@"
+  else
+    "${COMPOSE[@]}" exec -T web python manage.py "$@"
+  fi
+}
+
 run_discovery_timataka() {
-  "${COMPOSE[@]}" exec -T web python manage.py timataka_discover_events --limit "$DISCOVER_LIMIT"
+  run_manage "$DISCOVERY_TIMEOUT_SECONDS" timataka_discover_events --limit "$DISCOVER_LIMIT"
 }
 
 run_discovery_corsa() {
-  "${COMPOSE[@]}" exec -T web python manage.py corsa_discover_events --limit "$DISCOVER_LIMIT"
+  run_manage "$DISCOVERY_TIMEOUT_SECONDS" corsa_discover_events --limit "$DISCOVER_LIMIT"
 }
 
 run_processing() {
-  "${COMPOSE[@]}" exec -T web python manage.py timataka_process_events --limit "$EVENT_LIMIT"
-  "${COMPOSE[@]}" exec -T web python manage.py timataka_process_results --limit "$RESULT_LIMIT"
+  run_manage "$PROCESS_EVENTS_TIMEOUT_SECONDS" timataka_process_events --limit "$EVENT_LIMIT"
+  run_manage "$PROCESS_RESULTS_TIMEOUT_SECONDS" timataka_process_results --limit "$RESULT_LIMIT"
 }
 
 case "$MODE" in
