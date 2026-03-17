@@ -113,6 +113,11 @@ class Command(BaseCommand):
                         f"Use --include-server-errors to process them anyway."
                     )
                 )
+
+        if not options.get('race_ids'):
+            # Favor recent races so the recurring job does not get stuck on a
+            # large historical backlog of older failures.
+            races = races.order_by('-date', '-id')
         
         # Apply limit if specified
         if options.get('limit'):
@@ -139,6 +144,15 @@ class Command(BaseCommand):
         
         if races.count() > 10:
             self.stdout.write(f"  ... and {races.count() - 10} more races")
+
+    def _normalize_results_url(self, url):
+        if not url:
+            return url
+
+        if getattr(self, 'service', None):
+            return self.service.timataka_scraper.normalize_results_page_url(url, ensure_overall=True)
+
+        return url.replace('/raslisti/', '/urslit/')
 
     def _process_races(self, races):
         """Process each race to extract results"""
@@ -263,14 +277,15 @@ class Command(BaseCommand):
         """Build the results URL for a race"""
         # Check if race already has a results_url
         if race.results_url:
+            normalized_results_url = self._normalize_results_url(race.results_url)
             # If the results_url ends with /urslit/ but doesn't have race parameters,
             # it might be pointing to a directory rather than actual results
-            if (race.results_url.endswith('/urslit/') and 
-                'race=' not in race.results_url and 
-                'cat=' not in race.results_url):
+            if (normalized_results_url.endswith('/urslit/') and 
+                'race=' not in normalized_results_url and 
+                'cat=' not in normalized_results_url):
                 # Try to build a proper results URL using the event page
                 return self._build_results_url_from_event_page(race)
-            return race.results_url
+            return normalized_results_url
         
         # Try to build URL from event URL
         return self._build_results_url_from_event_page(race)
@@ -283,13 +298,14 @@ class Command(BaseCommand):
             return None
         
         # Case 1: Event URL already points to results with parameters
-        if '/urslit/' in event_url and ('race=' in event_url or 'cat=' in event_url):
-            return event_url
+        normalized_event_url = self._normalize_results_url(event_url)
+        if '/urslit/' in normalized_event_url and ('race=' in normalized_event_url or 'cat=' in normalized_event_url):
+            return normalized_event_url
         
         # Case 2: Event URL is an event page - we need to scrape it to find race links
         try:
             # Remove /urslit/ from event URL if it's there (might be incorrectly normalized)
-            clean_event_url = event_url.replace('/urslit/', '/').rstrip('/')
+            clean_event_url = event_url.replace('/urslit/', '/').replace('/raslisti/', '/').rstrip('/')
             if not clean_event_url.endswith('/'):
                 clean_event_url += '/'
             
@@ -331,7 +347,7 @@ class Command(BaseCommand):
                         base_url = clean_event_url.rstrip('/')
                         full_url = base_url + '/' + href
                     
-                    race_links.append(full_url)
+                    race_links.append(self._normalize_results_url(full_url))
             
             # If we found race links, return the first overall results link
             if race_links:
@@ -339,7 +355,7 @@ class Command(BaseCommand):
             
             # No race links found - this might be a simple event page
             # Return the original event URL (which should point to results)
-            return event_url
+            return normalized_event_url
                 
         except Exception as e:
             logger.error(f"Error building results URL from event page {event_url}: {str(e)}")

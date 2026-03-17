@@ -238,11 +238,15 @@ class TimatakaScraper:
             TimatakaScrapingError: If scraping fails or data is invalid
         """
         try:
+            normalized_event_url = self.normalize_results_page_url(event_url, ensure_overall=True)
+
             # Check if this URL is already a direct results URL with race parameters
             # (This distinguishes between normalized event pages and actual results URLs)
-            if '/urslit/' in event_url and 'race=' in event_url:
+            if 'race=' in normalized_event_url and (
+                '/urslit/' in normalized_event_url or '/raslisti/' in event_url
+            ):
                 # This is a direct results URL that needs to be treated as a single race
-                return self._handle_direct_results_url(event_url)
+                return self._handle_direct_results_url(normalized_event_url)
             
             # Fetch the event page with caching
             html_content = self._fetch_html_with_cache(event_url, event_obj, force_refresh)
@@ -297,7 +301,7 @@ class TimatakaScraper:
             # Build results URL for single race events
             # Since event URLs are now normalized to results URLs at save time,
             # we can use the source_url directly
-            results_url = source_url
+            results_url = self.normalize_results_page_url(source_url, ensure_overall=True)
             
             race_info = {
                 'name': main_race_name,
@@ -365,7 +369,7 @@ class TimatakaScraper:
                 
                 # Since event URLs are now normalized to results URLs at save time,
                 # we can use the source_url directly
-                results_url = source_url
+                results_url = self.normalize_results_page_url(source_url, ensure_overall=True)
                 
                 race_info = {
                     'name': f"{main_race_name} - {distance_label}",
@@ -400,7 +404,7 @@ class TimatakaScraper:
             for race_type, distance in found_distances:
                 # Since event URLs are now normalized to results URLs at save time,
                 # we can use the source_url directly
-                results_url = source_url
+                results_url = self.normalize_results_page_url(source_url, ensure_overall=True)
                 
                 race_info = {
                     'name': f"{main_race_name} - {race_type.replace('_', ' ').title()}",
@@ -481,9 +485,9 @@ class TimatakaScraper:
         base_date = self._extract_race_date_from_page(soup)
         if race_data:
             for race_entry in race_data.values():
-                href = self._ensure_overall_category(race_entry['href'])
+                href = self.normalize_results_page_url(race_entry['href'], ensure_overall=True)
                 base_url = source_url.rstrip('/')
-                results_url = f"{base_url}/{href}"
+                results_url = self.normalize_results_page_url(f"{base_url}/{href}", ensure_overall=True)
 
                 distance_km = race_entry.get('distance_km') or 0.0
                 context_name = (race_entry.get('context_name') or "").strip()
@@ -539,6 +543,19 @@ class TimatakaScraper:
             return '5k'
         else:
             return 'other'
+
+    def normalize_results_page_url(self, url: str, ensure_overall: bool = False) -> str:
+        """Normalize Timataka result URLs to canonical results pages."""
+        if not url:
+            return url
+
+        normalized = url.strip()
+        normalized = re.sub(r'(^|/)raslisti(?=(?:/|\?|$))', r'\1urslit', normalized)
+
+        if ensure_overall and 'race=' in normalized:
+            normalized = self._ensure_overall_category(normalized)
+
+        return normalized
 
     def _ensure_overall_category(self, href: str) -> str:
         """Ensure that a race results href includes cat=overall parameter"""
@@ -1234,7 +1251,7 @@ class TimatakaScraper:
         for link in overall_links:
             href = link.get('href', '')
             if 'cat=overall' in href:
-                return href
+                return self.normalize_results_page_url(href, ensure_overall=True)
         
         # If no overall link found, return empty string
         return ''
@@ -1571,10 +1588,10 @@ class TimatakaScraper:
         """
         try:
             # Ensure the URL has cat=overall parameter
-            enhanced_url = self._ensure_overall_category(results_url)
+            enhanced_url = self.normalize_results_page_url(results_url, ensure_overall=True)
             
             # Extract race information from the URL and page content
-            html_content = self._fetch_html_with_cache(results_url, race_obj, force_refresh)
+            html_content = self._fetch_html_with_cache(enhanced_url, race_obj, force_refresh)
             soup = BeautifulSoup(html_content, 'lxml')
             
             # Extract race name from page title or content
@@ -1623,5 +1640,5 @@ class TimatakaScraper:
                 'currency': 'ISK',
                 'description': f"Race with results at: {results_url}",
                 'source_url': results_url,
-                'results_url': self._ensure_overall_category(results_url)
+                'results_url': self.normalize_results_page_url(results_url, ensure_overall=True)
             }]

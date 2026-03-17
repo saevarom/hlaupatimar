@@ -593,9 +593,10 @@ class ScrapingService:
         Returns:
             Normalized URL that points to the appropriate page
         """
-        # If URL already contains /urslit/ or has race parameters, don't modify it
-        if '/urslit/' in url or 'race=' in url:
-            return url
+        # If this is already a direct race/results URL, normalize it to the
+        # canonical results-page form so we do not store start-list links.
+        if '/urslit/' in url or '/raslisti/' in url or 'race=' in url:
+            return self.timataka_scraper.normalize_results_page_url(url, ensure_overall=True)
         
         # If URL ends with /urslit (without trailing slash), add trailing slash
         if url.endswith('/urslit'):
@@ -992,7 +993,10 @@ class ScrapingService:
             date = event.date
 
         source_url = race_data.get('source_url', event.url)
-        results_url = race_data.get('results_url', '')
+        results_url = self.timataka_scraper.normalize_results_page_url(
+            race_data.get('results_url', ''),
+            ensure_overall=True,
+        )
         description = race_data.get('description', f"Race from event: {event.name}")
         currency = race_data.get('currency', 'ISK')
 
