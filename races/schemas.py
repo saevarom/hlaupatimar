@@ -37,6 +37,7 @@ class RaceHistorySchema(Schema):
     race_name: str
     race_date: date
     distance_km: float
+    discipline: str = "unknown"
     surface_type: str = "unknown"
     location: str
     finish_time: timedelta
@@ -155,6 +156,7 @@ class EventSummarySchema(Schema):
     id: int
     name: str
     date: date
+    discipline: str = "unknown"
     winning_time: Optional[timedelta] = None
     source: str
     race_count: int
@@ -170,6 +172,7 @@ class RaceSchema(Schema):
     description: Optional[str] = None
     race_type: str
     date: date
+    discipline: str = "unknown"
     winning_time: Optional[timedelta] = None
     median_finish_time: Optional[timedelta] = None
     finisher_count: Optional[int] = None

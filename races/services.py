@@ -814,11 +814,13 @@ class ScrapingService:
                 if key != 'event':  # Don't update the event field
                     setattr(existing_race, key, value)
             existing_race.save()
+            self._update_event_discipline_from_races(event)
             logger.info(f"Updated race: {race_name}")
             return existing_race
         else:
             # Create new race
             race = Race.objects.create(**race_data)
+            self._update_event_discipline_from_races(event)
             logger.info(f"Created race: {race_name} ({race.race_type})")
             return race
 
@@ -970,6 +972,23 @@ class ScrapingService:
             None,
         )
 
+    def _update_event_discipline_from_races(self, event: Event) -> None:
+        discipline_values = list(
+            Race.objects.filter(event=event)
+            .exclude(discipline='unknown')
+            .values_list('discipline', flat=True)
+        )
+        next_discipline = Event.infer_discipline_from_race_disciplines(discipline_values)
+        if not next_discipline:
+            return
+
+        if event.discipline != next_discipline:
+            Event.objects.filter(id=event.id).update(
+                discipline=next_discipline,
+                updated_at=timezone.now(),
+            )
+            event.discipline = next_discipline
+
     def _create_race_from_event_data(self, race_data: Dict, event: Event) -> tuple[Race, bool]:
         """Create or update a Race from scraped event data and link it to an Event.
 
@@ -1020,6 +1039,7 @@ class ScrapingService:
             existing_race.source_url = source_url
             existing_race.results_url = results_url
             existing_race.save()
+            self._update_event_discipline_from_races(event)
             return existing_race, False
 
         race = Race.objects.create(
@@ -1036,6 +1056,7 @@ class ScrapingService:
             source_url=source_url,
             results_url=results_url,
         )
+        self._update_event_discipline_from_races(event)
         return race, True
     
     def _create_race_from_discovery(self, race_info: Dict) -> Race:

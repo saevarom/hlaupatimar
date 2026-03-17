@@ -12,6 +12,33 @@ function birtaKyn(gender) {
   return "-";
 }
 
+function renderSpeedIndex(race) {
+  if (race.speed_index === null || race.speed_index === undefined) {
+    return "-";
+  }
+
+  return (
+    <span
+      className={`speed-index-pill ${
+        race.speed_index < 100
+          ? "speed-index-pill-fast"
+          : race.speed_index > 100
+            ? "speed-index-pill-slow"
+            : "speed-index-pill-neutral"
+      }`}
+      title={
+        race.speed_delta_percentage !== null && race.speed_delta_percentage !== undefined
+          ? `${Math.abs(Number(race.speed_delta_percentage)).toFixed(1)}% ${
+              Number(race.speed_delta_percentage) < 0 ? "hraðara" : "hægara"
+            } en dæmigert sambærilegt hlaup`
+          : "Ekki tiltækt"
+      }
+    >
+      {Number(race.speed_index).toFixed(1)}
+    </span>
+  );
+}
+
 export default function SearchPage({
   initialSearch,
   onPersistSearch,
@@ -444,6 +471,7 @@ export default function SearchPage({
               <tr>
                 <th>Dagsetning</th>
                 <th className="time-col">Sigurtími</th>
+                <th className="time-col">Hraðastuðull</th>
                 <th>Hlaup</th>
                 <th>Vegalengd</th>
                 <th>Staður</th>
@@ -454,6 +482,7 @@ export default function SearchPage({
                 <tr key={race.id}>
                   <td>{formatIsoDate(race.date)}</td>
                   <td className="time-col">{formatDuration(race.winning_time)}</td>
+                  <td className="time-col">{renderSpeedIndex(race)}</td>
                   <td>
                     <button className="link-button" onClick={() => onOpenRace(race.id)} type="button">
                       {race.name}

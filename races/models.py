@@ -21,6 +21,13 @@ RACE_SURFACE_TYPES = [
     ('unknown', 'Unknown'),
 ]
 
+DISCIPLINE_CHOICES = [
+    ('running', 'Running'),
+    ('biking', 'Biking'),
+    ('skiing', 'Skiing'),
+    ('unknown', 'Unknown'),
+]
+
 
 class Runner(models.Model):
     """Model representing a unique runner/participant"""
@@ -153,6 +160,7 @@ class Runner(models.Model):
                 'race_name': result.race.name,
                 'race_date': result.race.date,
                 'distance_km': result.race.distance_km,
+                'discipline': result.race.discipline,
                 'surface_type': result.race.surface_type,
                 'location': result.race.location,
                 'finish_time': result.finish_time,
@@ -322,12 +330,92 @@ class RaceDistanceKeyword(models.Model):
         return f"{self.snippet} -> {self.distance_km:g} km"
 
 
+class DisciplineKeyword(models.Model):
+    """
+    Dictionary rule for race/event discipline classification.
+
+    Example:
+    - snippet: "criterium"
+    - discipline: "biking"
+    """
+
+    snippet = models.CharField(
+        max_length=120,
+        help_text="Word or text snippet to match against race/event name, description, location, organizer, or URL.",
+    )
+    normalized_snippet = models.CharField(max_length=120, unique=True, editable=False, db_index=True)
+    discipline = models.CharField(max_length=20, choices=DISCIPLINE_CHOICES, db_index=True)
+    priority = models.PositiveIntegerField(
+        default=100,
+        help_text="Lower value means higher priority when multiple rules match.",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    notes = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['priority', 'normalized_snippet']
+        indexes = [
+            models.Index(fields=['discipline']),
+            models.Index(fields=['is_active', 'priority']),
+        ]
+
+    @classmethod
+    def get_active_rules(cls) -> list[tuple[str, str]]:
+        return list(
+            cls.objects.filter(is_active=True)
+            .order_by('priority', 'id')
+            .values_list('normalized_snippet', 'discipline')
+        )
+
+    def save(self, *args, **kwargs):
+        self.normalized_snippet = _normalize_surface_text(self.snippet).strip()
+        if not self.normalized_snippet:
+            raise ValidationError("snippet must contain at least one alphanumeric character")
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.snippet} -> {self.discipline}"
+
+
+class RaceQuerySet(models.QuerySet):
+    def public(self):
+        return self.filter(discipline='running')
+
+
+class PublicRaceManager(models.Manager.from_queryset(RaceQuerySet)):
+    def get_queryset(self):
+        return super().get_queryset().public()
+
+
+class EventQuerySet(models.QuerySet):
+    def public(self):
+        return self.filter(discipline='running')
+
+
+class PublicEventManager(models.Manager.from_queryset(EventQuerySet)):
+    def get_queryset(self):
+        return super().get_queryset().public()
+
+
 class Event(models.Model):
     """Model representing a racing event (found on timataka.net homepage)"""
-    
+    # Keep the default manager unfiltered for ingestion/admin workflows.
+    # Public reads should go through the running-only manager.
+    objects = models.Manager()
+    public = PublicEventManager()
+
     name = models.CharField(max_length=200, help_text="Event name as found on timataka.net homepage")
     date = models.DateField(help_text="Event date parsed from homepage")
     url = models.URLField(unique=True, help_text="URL to the event page on timataka.net")
+    discipline = models.CharField(
+        max_length=20,
+        choices=DISCIPLINE_CHOICES,
+        default='unknown',
+        db_index=True,
+        help_text="Broad sport classification used for public filtering and race comparisons.",
+    )
     
     # Processing status
     STATUS_CHOICES = [
@@ -354,17 +442,130 @@ class Event(models.Model):
         ordering = ['date']
         indexes = [
             models.Index(fields=['date']),
+            models.Index(fields=['discipline']),
             models.Index(fields=['status']),
             models.Index(fields=['url']),
         ]
-    
+
+    @staticmethod
+    def infer_discipline_from_race_disciplines(
+        disciplines: list[str],
+    ) -> str | None:
+        discipline_counts: dict[str, int] = {}
+        for discipline in disciplines:
+            normalized = (discipline or '').strip().lower()
+            if normalized not in {'running', 'biking', 'skiing'}:
+                continue
+            discipline_counts[normalized] = discipline_counts.get(normalized, 0) + 1
+
+        if not discipline_counts:
+            return None
+
+        return sorted(
+            discipline_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[0][0]
+
+    @staticmethod
+    def infer_discipline_from_rules(
+        name: str = '',
+        url: str = '',
+        discipline_rules: list[tuple[str, str]] | None = None,
+    ) -> str | None:
+        text = _normalize_surface_text(f"{name} {url}")
+
+        if discipline_rules is None:
+            try:
+                discipline_rules = DisciplineKeyword.get_active_rules()
+            except Exception:
+                discipline_rules = []
+
+        for snippet, discipline in discipline_rules:
+            if snippet and snippet in text:
+                return discipline
+        return None
+
+    @staticmethod
+    def infer_discipline(
+        name: str = '',
+        url: str = '',
+        current_discipline: str = 'unknown',
+        discipline_rules: list[tuple[str, str]] | None = None,
+    ) -> str:
+        matched_discipline = Event.infer_discipline_from_rules(
+            name=name,
+            url=url,
+            discipline_rules=discipline_rules,
+        )
+        if matched_discipline:
+            return matched_discipline
+
+        text = _normalize_surface_text(f"{name} {url}")
+        biking_keywords = [
+            'hjol',
+            'bike',
+            'cycling',
+            'criterium',
+            'mtb',
+            'downhill',
+            'townhill',
+            'time trial',
+            'tour de',
+            'brekkusprett',
+            'dh',
+            'xc',
+        ]
+        skiing_keywords = [
+            'ski',
+            'skida',
+            'skiða',
+            'skiganga',
+            'skimarathon',
+            'cross country',
+        ]
+        running_keywords = [
+            'hlaup',
+            'run',
+            'skokk',
+            'marathon',
+            'mara',
+            'trail',
+            'ultra',
+            'half',
+            'half marathon',
+            '5k',
+            '10k',
+        ]
+
+        if any(keyword in text for keyword in biking_keywords):
+            return 'biking'
+        if any(keyword in text for keyword in skiing_keywords):
+            return 'skiing'
+        if any(keyword in text for keyword in running_keywords):
+            return 'running'
+
+        return (current_discipline or 'unknown').strip().lower() or 'unknown'
+
+    def save(self, *args, **kwargs):
+        inferred_discipline = self.infer_discipline(
+            name=self.name,
+            url=self.url,
+            current_discipline=self.discipline,
+        )
+        self.discipline = inferred_discipline
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.name} - {self.date}"
 
 
 class Race(models.Model):
     """Model representing a running race/competition"""
-    
+    # Keep the default manager unfiltered for ingestion/admin workflows.
+    # Public reads should go through the running-only manager.
+    objects = models.Manager()
+    public = PublicRaceManager()
+
     RACE_TYPES = [
         ('marathon', 'Marathon'),
         ('half_marathon', 'Half Marathon'),
@@ -384,6 +585,13 @@ class Race(models.Model):
     date = models.DateField()
     location = models.CharField(max_length=100)
     distance_km = models.FloatField(validators=[MinValueValidator(0.1)])
+    discipline = models.CharField(
+        max_length=20,
+        choices=DISCIPLINE_CHOICES,
+        default='unknown',
+        db_index=True,
+        help_text="Broad sport classification used for public filtering and race comparisons.",
+    )
     elevation_gain_m = models.IntegerField(default=0, validators=[MinValueValidator(0)])
     surface_type = models.CharField(max_length=20, choices=RACE_SURFACE_TYPES, default='unknown', help_text="Road/trail classification", db_index=True)
     max_participants = models.IntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
@@ -415,6 +623,7 @@ class Race(models.Model):
         ordering = ['date']
         indexes = [
             models.Index(fields=['date']),
+            models.Index(fields=['discipline']),
             models.Index(fields=['race_type']),
             models.Index(fields=['location']),
         ]
@@ -544,6 +753,114 @@ class Race(models.Model):
 
         return 'road'
 
+    @staticmethod
+    def infer_discipline_from_rules(
+        name: str = '',
+        description: str = '',
+        location: str = '',
+        organizer: str = '',
+        event_name: str = '',
+        source_url: str = '',
+        results_url: str = '',
+        discipline_rules: list[tuple[str, str]] | None = None,
+    ) -> str | None:
+        text = _normalize_surface_text(
+            f"{name} {description} {location} {organizer} {event_name} {source_url} {results_url}"
+        )
+
+        if discipline_rules is None:
+            try:
+                discipline_rules = DisciplineKeyword.get_active_rules()
+            except Exception:
+                discipline_rules = []
+
+        for snippet, discipline in discipline_rules:
+            if snippet and snippet in text:
+                return discipline
+        return None
+
+    @staticmethod
+    def infer_discipline(
+        race_type: str,
+        name: str = '',
+        description: str = '',
+        location: str = '',
+        organizer: str = '',
+        event_name: str = '',
+        source_url: str = '',
+        results_url: str = '',
+        current_discipline: str = 'unknown',
+        fallback_discipline: str = 'unknown',
+        discipline_rules: list[tuple[str, str]] | None = None,
+    ) -> str:
+        matched_discipline = Race.infer_discipline_from_rules(
+            name=name,
+            description=description,
+            location=location,
+            organizer=organizer,
+            event_name=event_name,
+            source_url=source_url,
+            results_url=results_url,
+            discipline_rules=discipline_rules,
+        )
+        if matched_discipline:
+            return matched_discipline
+
+        normalized_race_type = (race_type or '').strip().lower()
+        if normalized_race_type in {'marathon', 'half_marathon', '10k', '5k', 'trail', 'ultra'}:
+            return 'running'
+
+        text = _normalize_surface_text(
+            f"{name} {description} {location} {organizer} {event_name} {source_url} {results_url}"
+        )
+        biking_keywords = [
+            'hjol',
+            'bike',
+            'cycling',
+            'criterium',
+            'mtb',
+            'downhill',
+            'townhill',
+            'time trial',
+            'tour de',
+            'brekkusprett',
+            'dh',
+            'xc',
+            'bmx',
+        ]
+        skiing_keywords = [
+            'ski',
+            'skida',
+            'skiða',
+            'skiganga',
+            'skimarathon',
+            'cross country',
+        ]
+        running_keywords = [
+            'hlaup',
+            'run',
+            'skokk',
+            'marathon',
+            'mara',
+            'trail',
+            'ultra',
+            'half',
+            'half marathon',
+            '5k',
+            '10k',
+        ]
+
+        if any(keyword in text for keyword in biking_keywords):
+            return 'biking'
+        if any(keyword in text for keyword in skiing_keywords):
+            return 'skiing'
+        if any(keyword in text for keyword in running_keywords):
+            return 'running'
+        if fallback_discipline in {'running', 'biking', 'skiing'}:
+            return fallback_discipline
+
+        return (current_discipline or 'unknown').strip().lower() or 'unknown'
+
     def save(self, *args, **kwargs):
         inferred_distance = self.infer_distance_from_rules(
             name=self.name,
@@ -566,6 +883,18 @@ class Race(models.Model):
                 elevation_gain_m=self.elevation_gain_m,
                 distance_km=self.distance_km,
             )
+        self.discipline = self.infer_discipline(
+            race_type=self.race_type,
+            name=self.name,
+            description=self.description,
+            location=self.location,
+            organizer=self.organizer,
+            event_name=self.event.name if self.event_id and self.event else '',
+            source_url=self.source_url,
+            results_url=self.results_url,
+            current_discipline=self.discipline,
+            fallback_discipline=self.event.discipline if self.event_id and self.event else 'unknown',
+        )
         super().save(*args, **kwargs)
 
     def __str__(self):

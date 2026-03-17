@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from django.utils import timezone
 from collections import defaultdict
 
-from .models import Race, Result, Split, Runner, RunnerAlias
+from .models import Event, Race, Result, Split, Runner, RunnerAlias
 from .schemas import (
     RaceSchema, RaceCreateSchema, RaceListFilterSchema,
     ResultSchema, ResultCreateSchema,
@@ -23,6 +23,14 @@ from .schemas import (
 from .services import ScrapingService, TimatakaScrapingError
 
 router = Router()
+
+
+def _public_races():
+    return Race.public.all()
+
+
+def _public_events():
+    return Event.public.all()
 
 
 def _resolve_runner_for_read(runner_identifier: str) -> Runner:
@@ -122,7 +130,8 @@ def _get_profile_race_counts(runners: List[Runner]) -> Dict[int, int]:
 
     race_ids_by_canonical = {runner_id: set() for runner_id in canonical_ids}
     for runner_id, race_id in Result.objects.filter(
-        runner_id__in=all_profile_runner_ids
+        runner_id__in=all_profile_runner_ids,
+        race__discipline='running',
     ).values_list("runner_id", "race_id").distinct():
         for canonical_id in canonical_ids_by_runner_id.get(runner_id, ()):
             race_ids_by_canonical[canonical_id].add(race_id)
@@ -283,6 +292,10 @@ def _race_comparison_label(race: Race) -> str:
 
 
 def _race_comparison_cohort_key(race: Race) -> Optional[str]:
+    if not _is_running_race_candidate(race):
+        return None
+
+    discipline = (race.discipline or "").strip().lower()
     race_type = (race.race_type or "").strip().lower()
     surface_type = (race.surface_type or "").strip().lower()
     distance_km = float(race.distance_km or 0.0)
@@ -291,13 +304,13 @@ def _race_comparison_cohort_key(race: Race) -> Optional[str]:
         return None
 
     if race_type == "5k" and 4.75 <= distance_km <= 5.25:
-        return f"type:{race_type}:surface:{surface_type}"
+        return f"discipline:{discipline}:type:{race_type}:surface:{surface_type}"
     if race_type == "10k" and 9.5 <= distance_km <= 10.5:
-        return f"type:{race_type}:surface:{surface_type}"
+        return f"discipline:{discipline}:type:{race_type}:surface:{surface_type}"
     if race_type == "half_marathon" and 20.5 <= distance_km <= 21.7:
-        return f"type:{race_type}:surface:{surface_type}"
+        return f"discipline:{discipline}:type:{race_type}:surface:{surface_type}"
     if race_type == "marathon" and 42.0 <= distance_km <= 42.6:
-        return f"type:{race_type}:surface:{surface_type}"
+        return f"discipline:{discipline}:type:{race_type}:surface:{surface_type}"
     return None
 
 
@@ -347,63 +360,7 @@ def _is_plausible_race_performance(
 
 
 def _is_running_race_candidate(race: Race) -> bool:
-    text = " ".join(
-        [
-            str(race.name or ""),
-            str(race.description or ""),
-            str(race.location or ""),
-        ]
-    ).casefold()
-    excluded_keywords = [
-        "hjól",
-        "hjol",
-        "bike",
-        "cycling",
-        "criterium",
-        "tour de",
-        "castelli",
-        "time trial",
-        "mtb",
-        "downhill",
-        "townhill",
-        "tt:",
-        " tt ",
-        "dh",
-        "xc",
-        "skíða",
-        "skida",
-        "ski",
-        "göngu",
-        "gongu",
-        "ganga",
-        "canicross",
-        "hund",
-        "sleða",
-        "sleda",
-        "hringurinn",
-        "scooter",
-        "torfæra",
-        "torfaera",
-    ]
-    if any(keyword in text for keyword in excluded_keywords):
-        return False
-
-    positive_keywords = [
-        "hlaup",
-        "run",
-        "skokk",
-        "mara",
-        "marathon",
-        "trail",
-        "ultra",
-        "5k",
-        "10k",
-        "5km",
-        "10km",
-        "hálf",
-        "half",
-    ]
-    return any(keyword in text for keyword in positive_keywords)
+    return (race.discipline or "").strip().lower() == "running"
 
 
 def _build_race_speed_data(
@@ -431,8 +388,9 @@ def _build_race_speed_data(
         return {}
 
     peer_races = list(
-        Race.objects.filter(date__lte=today).only(
+        _public_races().filter(date__lte=today).only(
             "id",
+            "discipline",
             "race_type",
             "surface_type",
             "distance_km",
@@ -541,6 +499,30 @@ def _build_race_speed_data(
         }
 
     return speed_data
+
+
+def _attach_race_speed_fields(race_items: List[Race]) -> List[Race]:
+    speed_data_by_race_id = _build_race_speed_data(race_items)
+    for race in race_items:
+        race.median_finish_time = None
+        race.finisher_count = None
+        race.speed_index = None
+        race.speed_delta_percentage = None
+        race.speed_rank_percentage = None
+        race.speed_cohort_size = None
+
+        speed_data = speed_data_by_race_id.get(int(race.id))
+        if not speed_data:
+            continue
+
+        race.median_finish_time = _timedelta_from_seconds(speed_data["median_seconds"])
+        race.finisher_count = int(speed_data["finishers_in_race"])
+        race.speed_index = speed_data["speed_index"]
+        race.speed_delta_percentage = speed_data["speed_delta_percentage"]
+        race.speed_rank_percentage = speed_data["speed_rank_percentage"]
+        race.speed_cohort_size = int(speed_data["cohort_race_count"])
+
+    return race_items
 
 
 def _build_race_comparison(
@@ -662,32 +644,39 @@ def get_supported_race_types(request):
 @router.get("/search", response=List[RaceSchema])
 def search_races(request, q: str, limit: int = 20):
     """Search races by name, description, or location"""
-    queryset = _with_winning_time(
-        Race.objects.filter(
-            Q(name__icontains=q) |
-            Q(description__icontains=q) |
-            Q(location__icontains=q) |
-            Q(organizer__icontains=q)
-        )
-        .order_by("-date", "-id")
+    race_items = list(
+        _with_winning_time(
+            _public_races().filter(
+                Q(name__icontains=q) |
+                Q(description__icontains=q) |
+                Q(location__icontains=q) |
+                Q(organizer__icontains=q)
+            )
+            .order_by("-date", "-id")
+        )[:limit]
     )
-    return queryset[:limit]
+    return _attach_race_speed_fields(race_items)
 
 
 @router.get("/events/latest", response=List[EventSummarySchema])
 def list_latest_events(request, limit: int = 12):
     """List latest processed events (newest by event date)."""
-    from .models import Event
-
     safe_limit = max(1, min(limit, 50))
     placeholder_date = date(2099, 12, 31)
     today = timezone.localdate()
 
     events = (
-        Event.objects.filter(races__isnull=False)
+        _public_events()
+        .filter(races__discipline='running')
         .exclude(date=placeholder_date)
-        .annotate(race_count=Count("races", distinct=True))
-        .annotate(result_count=Count("races__results", distinct=True))
+        .annotate(race_count=Count("races", filter=Q(races__discipline='running'), distinct=True))
+        .annotate(
+            result_count=Count(
+                "races__results",
+                filter=Q(races__discipline='running'),
+                distinct=True,
+            )
+        )
         .order_by("-date", "-id")
         .distinct()[:safe_limit]
     )
@@ -700,7 +689,7 @@ def list_latest_events(request, limit: int = 12):
         preview_race_id = None
         if has_results:
             preview_race_id = (
-                Race.objects.filter(event_id=event.id, results__isnull=False)
+                _public_races().filter(event_id=event.id, results__isnull=False)
                 .order_by("-date", "-id")
                 .values_list("id", flat=True)
                 .first()
@@ -718,6 +707,7 @@ def list_latest_events(request, limit: int = 12):
                 "id": event.id,
                 "name": event.name,
                 "date": event.date,
+                "discipline": event.discipline,
                 "winning_time": winning_time_by_race_id.get(preview_race_id) if preview_race_id else None,
                 "source": event.source,
                 "race_count": getattr(event, "race_count", 0),
@@ -745,7 +735,7 @@ def list_races(
     offset: int = 0
 ):
     """List all races with optional filtering"""
-    queryset = Race.objects.all()
+    queryset = _public_races()
     
     if race_type:
         queryset = queryset.filter(race_type=race_type)
@@ -781,7 +771,7 @@ def browse_races(
     safe_limit = max(1, min(limit, 100))
     safe_offset = max(0, offset)
 
-    queryset = Race.objects.all()
+    queryset = _public_races()
 
     if q:
         queryset = queryset.filter(
@@ -800,23 +790,7 @@ def browse_races(
     race_items = list(_with_winning_time(queryset))
     total = len(race_items)
 
-    speed_data_by_race_id = _build_race_speed_data(race_items)
-    for race in race_items:
-        race.median_finish_time = None
-        race.finisher_count = None
-        race.speed_index = None
-        race.speed_delta_percentage = None
-        race.speed_rank_percentage = None
-        race.speed_cohort_size = None
-        speed_data = speed_data_by_race_id.get(int(race.id))
-        if not speed_data:
-            continue
-        race.median_finish_time = _timedelta_from_seconds(speed_data["median_seconds"])
-        race.finisher_count = int(speed_data["finishers_in_race"])
-        race.speed_index = speed_data["speed_index"]
-        race.speed_delta_percentage = speed_data["speed_delta_percentage"]
-        race.speed_rank_percentage = speed_data["speed_rank_percentage"]
-        race.speed_cohort_size = int(speed_data["cohort_race_count"])
+    _attach_race_speed_fields(race_items)
 
     if order_by == "date_asc":
         race_items.sort(key=lambda race: (race.date, race.id))
@@ -856,13 +830,13 @@ def browse_races(
 @router.get("/{race_id}/event-races", response=List[RaceSchema])
 def list_event_races(request, race_id: int, limit: int = 20):
     """List other races that belong to the same event as the selected race."""
-    race = get_object_or_404(Race, id=race_id)
+    race = get_object_or_404(_public_races(), id=race_id)
     if not race.event_id:
         return []
 
     safe_limit = max(1, min(limit, 50))
     return (
-        Race.objects.filter(event_id=race.event_id)
+        _public_races().filter(event_id=race.event_id)
         .exclude(id=race.id)
         .order_by("date", "distance_km", "name")[:safe_limit]
     )
@@ -878,7 +852,7 @@ def create_race(request, payload: RaceCreateSchema):
 @router.get("/{race_id}", response=RaceSchema)
 def get_race(request, race_id: int):
     """Get a specific race by ID"""
-    return get_object_or_404(Race, id=race_id)
+    return get_object_or_404(_public_races(), id=race_id)
 
 
 @router.put("/{race_id}", response=RaceSchema)
@@ -909,7 +883,7 @@ def list_race_results(
     offset: int = 0
 ):
     """List all results for a specific race"""
-    race = get_object_or_404(Race, id=race_id)
+    race = get_object_or_404(_public_races(), id=race_id)
     queryset = race.results.all()
     
     if gender:
@@ -988,7 +962,7 @@ def search_runners(
         | Q(stable_id__in=alias_stable_subquery)
         | Q(id__in=alias_runner_id_subquery)
     ).filter(
-        Q(results__isnull=False) | Q(canonical_aliases__is_active=True)
+        Q(results__race__discipline='running') | Q(canonical_aliases__is_active=True)
     ).distinct()
     
     # Apply filters
@@ -1047,34 +1021,36 @@ def get_runner_detail(request, runner_id: str):
     """
     runner = _resolve_runner_for_read(runner_id)
     
-    # Get race history summary using the model method
-    race_history_data = runner.get_race_history_summary()
-    
-    # Convert to schema format
-    race_history = [
-        {
-            'race_id': race['race_id'],
-            'event_name': race['event_name'],
-            'race_name': race['race_name'],
-            'race_date': race['race_date'],
-            'distance_km': race['distance_km'],
-            'surface_type': race.get('surface_type', 'unknown'),
-            'location': race['location'],
-            'finish_time': race['finish_time'],
-            'status': race['status'],
-            'bib_number': race['bib_number'],
-            'club': race['club'],
-            'splits': [
-                {
-                    'name': split['name'],
-                    'distance_km': split['distance_km'],
-                    'time': split['time']
-                }
-                for split in race['splits']
-            ]
-        }
-        for race in race_history_data
-    ]
+    race_history_results = list(
+        runner.get_race_history()
+        .filter(race__discipline='running')
+    )
+    race_history = []
+    for result in race_history_results:
+        race_history.append(
+            {
+                'race_id': result.race.id,
+                'event_name': result.race.event.name if result.race.event else 'Unknown Event',
+                'race_name': result.race.name,
+                'race_date': result.race.date,
+                'distance_km': result.race.distance_km,
+                'discipline': result.race.discipline,
+                'surface_type': result.race.surface_type,
+                'location': result.race.location,
+                'finish_time': result.finish_time,
+                'status': result.status,
+                'bib_number': result.bib_number,
+                'club': result.club,
+                'splits': [
+                    {
+                        'name': split.split_name,
+                        'distance_km': split.distance_km,
+                        'time': split.split_time,
+                    }
+                    for split in result.splits.all()
+                ],
+            }
+        )
     
     return RunnerDetailSchema(
         id=runner.id,
@@ -1093,7 +1069,7 @@ def get_runner_detail(request, runner_id: str):
 @router.get("/{race_id}/stats", response=RaceStatsSchema)
 def get_race_stats(request, race_id: int, gender: Optional[str] = None):
     """Get aggregate MVP statistics for a race."""
-    race = get_object_or_404(Race, id=race_id)
+    race = get_object_or_404(_public_races(), id=race_id)
     queryset = race.results.select_related("runner").all()
     if gender and gender.upper() in {"F", "M"}:
         queryset = queryset.filter(runner__gender=gender.upper())
@@ -1302,7 +1278,7 @@ def list_race_results_table(
     """
     List race results in a frontend-friendly format with runner metadata.
     """
-    race = get_object_or_404(Race, id=race_id)
+    race = get_object_or_404(_public_races(), id=race_id)
     status_priority = Case(
         When(status='finished', then=0),
         default=1,

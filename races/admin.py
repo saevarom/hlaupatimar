@@ -1,5 +1,6 @@
 from django.contrib import admin
 from .models import (
+    DisciplineKeyword,
     Event,
     Race,
     RaceDistanceKeyword,
@@ -36,8 +37,8 @@ class RunnerAliasAdmin(admin.ModelAdmin):
 
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
-    list_display = ['name', 'date', 'source', 'status', 'cache_status', 'last_processed', 'created_at']
-    list_filter = ['source', 'status', 'date', 'last_processed']
+    list_display = ['name', 'date', 'discipline', 'source', 'status', 'cache_status', 'last_processed', 'created_at']
+    list_filter = ['discipline', 'source', 'status', 'date', 'last_processed']
     search_fields = ['name', 'url']
     date_hierarchy = 'date'
     ordering = ['-date']
@@ -54,8 +55,8 @@ class EventAdmin(admin.ModelAdmin):
 
 @admin.register(Race)
 class RaceAdmin(admin.ModelAdmin):
-    list_display = ['name', 'event', 'date', 'source', 'race_type', 'location', 'distance_km', 'cache_status']
-    list_filter = ['source', 'race_type', 'date', 'location', 'event__status', 'event__source']
+    list_display = ['name', 'event', 'date', 'discipline', 'source', 'race_type', 'location', 'distance_km', 'cache_status']
+    list_filter = ['discipline', 'source', 'race_type', 'date', 'location', 'event__status', 'event__source']
     search_fields = ['name', 'location', 'organizer', 'event__name']
     date_hierarchy = 'date'
     ordering = ['-date']
@@ -111,6 +112,15 @@ class RaceSurfaceKeywordAdmin(admin.ModelAdmin):
 class RaceDistanceKeywordAdmin(admin.ModelAdmin):
     list_display = ['snippet', 'distance_km', 'priority', 'is_active', 'updated_at']
     list_filter = ['is_active']
+    search_fields = ['snippet', 'notes']
+    ordering = ['priority', 'snippet']
+    readonly_fields = ['normalized_snippet', 'created_at', 'updated_at']
+
+
+@admin.register(DisciplineKeyword)
+class DisciplineKeywordAdmin(admin.ModelAdmin):
+    list_display = ['snippet', 'discipline', 'priority', 'is_active', 'updated_at']
+    list_filter = ['discipline', 'is_active']
     search_fields = ['snippet', 'notes']
     ordering = ['priority', 'snippet']
     readonly_fields = ['normalized_snippet', 'created_at', 'updated_at']
