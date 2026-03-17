@@ -1,6 +1,6 @@
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
-async function fetchJson(path, params) {
+async function requestJson(path, { params, method = "GET", body } = {}) {
   const normalizedBase = String(API_BASE).replace(/\/+$/, "");
   const normalizedPath =
     path.startsWith("/api/") && normalizedBase.endsWith("/api")
@@ -16,7 +16,12 @@ async function fetchJson(path, params) {
   }
 
   const response = await fetch(url, {
-    headers: { Accept: "application/json" }
+    method,
+    headers: {
+      Accept: "application/json",
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {})
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {})
   });
 
   if (!response.ok) {
@@ -33,6 +38,10 @@ async function fetchJson(path, params) {
   }
 
   return response.json();
+}
+
+async function fetchJson(path, params) {
+  return requestJson(path, { params });
 }
 
 export function searchRunners(filters) {
@@ -79,5 +88,12 @@ export function getEventRaces(raceId, options = {}) {
 export function getLatestEvents(options = {}) {
   return fetchJson("/api/races/events/latest", {
     limit: options.limit ?? 12
+  });
+}
+
+export function createRaceCorrectionSuggestion(raceId, payload) {
+  return requestJson(`/api/races/${encodeURIComponent(raceId)}/correction-suggestions`, {
+    method: "POST",
+    body: payload
   });
 }

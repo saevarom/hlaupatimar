@@ -1,7 +1,37 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { getEventRaces, getRaceDetail, getRaceResultsTable, getRaceStats } from "../api";
+import { createPortal } from "react-dom";
+import {
+  createRaceCorrectionSuggestion,
+  getEventRaces,
+  getRaceDetail,
+  getRaceResultsTable,
+  getRaceStats
+} from "../api";
 import { normalizeSurfaceType } from "../lib/trends";
 import { formatDuration, formatIsoDate, formatSecondsToDuration, parseDurationToSeconds } from "../lib/time";
+
+const DISCIPLINE_OPTIONS = [
+  { value: "running", label: "Hlaup" },
+  { value: "biking", label: "Hjólreiðar" },
+  { value: "skiing", label: "Skíði" },
+  { value: "unknown", label: "Óþekkt" }
+];
+
+const RACE_TYPE_OPTIONS = [
+  { value: "5k", label: "5 km" },
+  { value: "10k", label: "10 km" },
+  { value: "half_marathon", label: "Hálft maraþon" },
+  { value: "marathon", label: "Maraþon" },
+  { value: "trail", label: "Utanvegahlaup" },
+  { value: "ultra", label: "Ultra" },
+  { value: "other", label: "Annað" }
+];
+
+const SURFACE_OPTIONS = [
+  { value: "road", label: "Götuhlaup" },
+  { value: "trail", label: "Utanvegahlaup" },
+  { value: "unknown", label: "Óþekkt" }
+];
 
 function birtaKyn(gender) {
   if (gender === "F") {
@@ -150,6 +180,14 @@ function getPercentileExplanation(label) {
   return `${label}: ${fasterOrEqual}% hlaupara voru jafnhraðir eða hraðari, ${slower}% voru hægari.`;
 }
 
+function formatDisciplineLabel(value) {
+  return DISCIPLINE_OPTIONS.find((option) => option.value === value)?.label ?? "Óþekkt";
+}
+
+function formatRaceTypeLabel(value) {
+  return RACE_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? "Annað";
+}
+
 function InfoTip({ text }) {
   const tooltipId = useId();
 
@@ -192,6 +230,19 @@ export default function RacePage({
   const [statsError, setStatsError] = useState("");
   const [resultsError, setResultsError] = useState("");
   const [selectedGender, setSelectedGender] = useState("");
+  const [suggestionForm, setSuggestionForm] = useState({
+    suggested_surface_type: "",
+    suggested_distance_km: "",
+    suggested_discipline: "",
+    suggested_race_type: "",
+    comment: "",
+    submitter_name: "",
+    submitter_email: ""
+  });
+  const [suggestionSubmitting, setSuggestionSubmitting] = useState(false);
+  const [suggestionError, setSuggestionError] = useState("");
+  const [suggestionSuccess, setSuggestionSuccess] = useState("");
+  const [suggestionModalOpen, setSuggestionModalOpen] = useState(false);
   const resultsTableRef = useRef(null);
   const lastScrollKeyRef = useRef("");
 
@@ -259,6 +310,40 @@ export default function RacePage({
       cancelled = true;
     };
   }, [raceId, selectedGender]);
+
+  useEffect(() => {
+    setSuggestionForm({
+      suggested_surface_type: "",
+      suggested_distance_km: "",
+      suggested_discipline: "",
+      suggested_race_type: "",
+      comment: "",
+      submitter_name: "",
+      submitter_email: ""
+    });
+    setSuggestionError("");
+    setSuggestionSuccess("");
+    setSuggestionModalOpen(false);
+  }, [raceId]);
+
+  useEffect(() => {
+    if (!suggestionModalOpen) {
+      return undefined;
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setSuggestionModalOpen(false);
+      }
+    }
+
+    document.body.classList.add("modal-open");
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.classList.remove("modal-open");
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [suggestionModalOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -438,6 +523,52 @@ export default function RacePage({
     { key: "winner", label: "Sigurtími", metric: stats?.comparison?.winner }
   ];
 
+  function updateSuggestionField(field, value) {
+    setSuggestionForm((current) => ({
+      ...current,
+      [field]: value
+    }));
+  }
+
+  async function handleSuggestionSubmit(event) {
+    event.preventDefault();
+    setSuggestionSubmitting(true);
+    setSuggestionError("");
+    setSuggestionSuccess("");
+
+    try {
+      const payload = {
+        suggested_surface_type: suggestionForm.suggested_surface_type || undefined,
+        suggested_distance_km:
+          suggestionForm.suggested_distance_km === ""
+            ? undefined
+            : Number(suggestionForm.suggested_distance_km),
+        suggested_discipline: suggestionForm.suggested_discipline || undefined,
+        suggested_race_type: suggestionForm.suggested_race_type || undefined,
+        comment: suggestionForm.comment.trim() || undefined,
+        submitter_name: suggestionForm.submitter_name.trim() || undefined,
+        submitter_email: suggestionForm.submitter_email.trim() || undefined
+      };
+
+      await createRaceCorrectionSuggestion(raceId, payload);
+      setSuggestionSuccess("Takk. Tillagan hefur verið vistuð og bíður yfirferðar.");
+      setSuggestionForm({
+        suggested_surface_type: "",
+        suggested_distance_km: "",
+        suggested_discipline: "",
+        suggested_race_type: "",
+        comment: "",
+        submitter_name: "",
+        submitter_email: ""
+      });
+      setSuggestionModalOpen(false);
+    } catch (submitError) {
+      setSuggestionError(submitError.message || "Ekki tókst að senda tillögu.");
+    } finally {
+      setSuggestionSubmitting(false);
+    }
+  }
+
   return (
     <section className="panel">
       <div className="race-header">
@@ -493,6 +624,191 @@ export default function RacePage({
           <p>{surface.label}</p>
         </article>
       </div>
+
+      <div className="correction-suggestion-launch enter-up">
+        <div>
+          <h3 className="section-title with-info">
+            Leiðréttingartillaga
+            <InfoTip text="Ef flokkun hlaupsins er röng geturðu sent inn tillögu um rétt yfirborð, vegalengd, grein eða flokk." />
+          </h3>
+          <p className="quiet">
+            Sendu inn breytingatillögu ef hlaup er rangt flokkað.
+          </p>
+        </div>
+        <button type="button" onClick={() => setSuggestionModalOpen(true)}>
+          Senda tillögu
+        </button>
+      </div>
+
+      {suggestionSuccess ? <p className="success-text">{suggestionSuccess}</p> : null}
+
+      {suggestionModalOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="modal-backdrop"
+              role="presentation"
+              onClick={(event) => {
+                if (event.target === event.currentTarget && !suggestionSubmitting) {
+                  setSuggestionModalOpen(false);
+                }
+              }}
+            >
+              <div
+                className="modal-card correction-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="correction-modal-title"
+              >
+                <div className="modal-header">
+                  <div>
+                    <h3 id="correction-modal-title">Senda leiðréttingartillögu</h3>
+                    <p className="quiet">
+                      Veldu aðeins þau gildi sem ættu að breytast.
+                    </p>
+                  </div>
+                  <button
+                    className="ghost"
+                    type="button"
+                    onClick={() => setSuggestionModalOpen(false)}
+                    disabled={suggestionSubmitting}
+                  >
+                    Loka
+                  </button>
+                </div>
+
+                <form className="correction-suggestion-form" onSubmit={handleSuggestionSubmit}>
+                  <div className="correction-current-grid">
+                    <div className="correction-current-item">
+                      <span>Núverandi yfirborð</span>
+                      <strong>{surface.label}</strong>
+                    </div>
+                    <div className="correction-current-item">
+                      <span>Núverandi vegalengd</span>
+                      <strong>{race.distance_km ? `${race.distance_km} km` : "-"}</strong>
+                    </div>
+                    <div className="correction-current-item">
+                      <span>Núverandi grein</span>
+                      <strong>{formatDisciplineLabel(race.discipline)}</strong>
+                    </div>
+                    <div className="correction-current-item">
+                      <span>Núverandi flokkur</span>
+                      <strong>{formatRaceTypeLabel(race.race_type)}</strong>
+                    </div>
+                  </div>
+
+                  <div className="correction-fields-grid">
+                    <label>
+                      Yfirborð
+                      <select
+                        value={suggestionForm.suggested_surface_type}
+                        onChange={(event) => updateSuggestionField("suggested_surface_type", event.target.value)}
+                      >
+                        <option value="">Halda óbreyttu</option>
+                        {SURFACE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      Vegalengd (km)
+                      <input
+                        type="number"
+                        min="0.1"
+                        step="0.1"
+                        inputMode="decimal"
+                        value={suggestionForm.suggested_distance_km}
+                        onChange={(event) => updateSuggestionField("suggested_distance_km", event.target.value)}
+                        placeholder={race.distance_km ? String(race.distance_km) : "t.d. 21.1"}
+                      />
+                    </label>
+
+                    <label>
+                      Grein
+                      <select
+                        value={suggestionForm.suggested_discipline}
+                        onChange={(event) => updateSuggestionField("suggested_discipline", event.target.value)}
+                      >
+                        <option value="">Halda óbreyttu</option>
+                        {DISCIPLINE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      Flokkur
+                      <select
+                        value={suggestionForm.suggested_race_type}
+                        onChange={(event) => updateSuggestionField("suggested_race_type", event.target.value)}
+                      >
+                        <option value="">Halda óbreyttu</option>
+                        {RACE_TYPE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <label>
+                    Athugasemd
+                    <textarea
+                      rows="4"
+                      value={suggestionForm.comment}
+                      onChange={(event) => updateSuggestionField("comment", event.target.value)}
+                      placeholder="Hvað er rangt og hvað ætti að vera rétt?"
+                    />
+                  </label>
+
+                  <div className="correction-fields-grid correction-fields-grid-contact">
+                    <label>
+                      Nafn
+                      <input
+                        type="text"
+                        value={suggestionForm.submitter_name}
+                        onChange={(event) => updateSuggestionField("submitter_name", event.target.value)}
+                        placeholder="Valfrjálst"
+                      />
+                    </label>
+
+                    <label>
+                      Netfang
+                      <input
+                        type="email"
+                        value={suggestionForm.submitter_email}
+                        onChange={(event) => updateSuggestionField("submitter_email", event.target.value)}
+                        placeholder="Valfrjálst"
+                      />
+                    </label>
+                  </div>
+
+                  {suggestionError ? <p className="error">{suggestionError}</p> : null}
+
+                  <div className="correction-actions">
+                    <button
+                      className="ghost"
+                      type="button"
+                      onClick={() => setSuggestionModalOpen(false)}
+                      disabled={suggestionSubmitting}
+                    >
+                      Hætta við
+                    </button>
+                    <button type="submit" disabled={suggestionSubmitting}>
+                      {suggestionSubmitting ? "Sendi..." : "Senda tillögu"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
 
       <h3 className="section-title with-info">
         Tölfræði

@@ -3,6 +3,7 @@ from .models import (
     DisciplineKeyword,
     Event,
     Race,
+    RaceCorrectionSuggestion,
     RaceDistanceKeyword,
     RaceSurfaceKeyword,
     Result,
@@ -124,6 +125,76 @@ class DisciplineKeywordAdmin(admin.ModelAdmin):
     search_fields = ['snippet', 'notes']
     ordering = ['priority', 'snippet']
     readonly_fields = ['normalized_snippet', 'created_at', 'updated_at']
+
+
+@admin.register(RaceCorrectionSuggestion)
+class RaceCorrectionSuggestionAdmin(admin.ModelAdmin):
+    list_display = [
+        'race',
+        'status',
+        'suggested_surface_type',
+        'suggested_distance_km',
+        'suggested_discipline',
+        'suggested_race_type',
+        'submitter_name',
+        'created_at',
+    ]
+    list_filter = ['status', 'suggested_surface_type', 'suggested_discipline', 'suggested_race_type']
+    search_fields = ['race__name', 'comment', 'submitter_name', 'submitter_email']
+    ordering = ['-created_at']
+    actions = ['apply_selected_suggestions', 'reject_selected_suggestions']
+    list_select_related = ['race', 'race__event']
+    readonly_fields = [
+        'race',
+        'current_surface_type',
+        'current_distance_km',
+        'current_discipline',
+        'current_race_type',
+        'status',
+        'reviewed_at',
+        'review_notes',
+        'suggested_surface_type',
+        'suggested_distance_km',
+        'suggested_discipline',
+        'suggested_race_type',
+        'comment',
+        'submitter_name',
+        'submitter_email',
+        'created_at',
+        'updated_at',
+    ]
+
+    @admin.action(description='Apply selected suggestions and mark as done')
+    def apply_selected_suggestions(self, request, queryset):
+        applied = 0
+        skipped = 0
+        for suggestion in queryset.select_related('race__event'):
+            if suggestion.status == 'applied':
+                skipped += 1
+                continue
+            suggestion.apply_to_race(review_notes='Applied via admin action.')
+            applied += 1
+
+        if applied:
+            self.message_user(request, f"Applied {applied} suggestion(s).")
+        if skipped:
+            self.message_user(request, f"Skipped {skipped} already-applied suggestion(s).")
+
+    @admin.action(description='Reject selected suggestions')
+    def reject_selected_suggestions(self, request, queryset):
+        rejected = 0
+        skipped = 0
+        for suggestion in queryset:
+            if suggestion.status == 'rejected':
+                skipped += 1
+                continue
+            suggestion.reject(review_notes='Rejected via admin action.')
+            rejected += 1
+
+        if rejected:
+            self.message_user(request, f"Rejected {rejected} suggestion(s).")
+        if skipped:
+            self.message_user(request, f"Skipped {skipped} already-rejected suggestion(s).")
 
 
 class RelatedFieldDropdownFilter(admin.SimpleListFilter):

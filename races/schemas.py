@@ -224,6 +224,30 @@ class RaceCreateSchema(Schema):
     results_url: Optional[str] = None
 
 
+class RaceCorrectionSuggestionCreateSchema(Schema):
+    suggested_surface_type: Optional[str] = None
+    suggested_distance_km: Optional[float] = None
+    suggested_discipline: Optional[str] = None
+    suggested_race_type: Optional[str] = None
+    comment: Optional[str] = None
+    submitter_name: Optional[str] = None
+    submitter_email: Optional[str] = None
+
+
+class RaceCorrectionSuggestionSchema(Schema):
+    id: int
+    race_id: int
+    status: str
+    comment: str = ""
+    submitter_name: str = ""
+    submitter_email: str = ""
+    suggested_surface_type: str = ""
+    suggested_distance_km: Optional[float] = None
+    suggested_discipline: str = ""
+    suggested_race_type: str = ""
+    created_at: datetime
+
+
 class ResultSchema(Schema):
     id: int
     race_id: int

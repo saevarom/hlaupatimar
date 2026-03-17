@@ -4,12 +4,13 @@ from django.shortcuts import get_object_or_404
 from django.db.models import Q, Count, Case, When, IntegerField, OuterRef, Subquery, DurationField
 from django.http import Http404
 from django.http import JsonResponse
+from django.core.exceptions import ValidationError
 from typing import Dict, List, Optional
 from datetime import date, timedelta
 from django.utils import timezone
 from collections import defaultdict
 
-from .models import Event, Race, Result, Split, Runner, RunnerAlias
+from .models import Event, Race, RaceCorrectionSuggestion, Result, Split, Runner, RunnerAlias
 from .schemas import (
     RaceSchema, RaceCreateSchema, RaceListFilterSchema,
     ResultSchema, ResultCreateSchema,
@@ -18,7 +19,7 @@ from .schemas import (
     RunnerSchema, RunnerSearchSchema, RunnerDetailSchema, RaceResultRowSchema, EventSummarySchema,
     RaceStatsSchema, RaceTimeStatsSchema, RaceTimeBucketSchema, RaceGenderStatsSchema,
     RaceAgeBandStatsSchema, RaceClubStatsSchema, RaceComparisonSchema, RaceComparisonMetricSchema,
-    PaginatedRaceListSchema
+    PaginatedRaceListSchema, RaceCorrectionSuggestionCreateSchema, RaceCorrectionSuggestionSchema
 )
 from .services import ScrapingService, TimatakaScrapingError
 
@@ -853,6 +854,35 @@ def create_race(request, payload: RaceCreateSchema):
 def get_race(request, race_id: int):
     """Get a specific race by ID"""
     return get_object_or_404(_public_races(), id=race_id)
+
+
+@router.post("/{race_id}/correction-suggestions", response=RaceCorrectionSuggestionSchema)
+def create_race_correction_suggestion(
+    request,
+    race_id: int,
+    payload: RaceCorrectionSuggestionCreateSchema,
+):
+    race = get_object_or_404(_public_races(), id=race_id)
+    suggestion = RaceCorrectionSuggestion(
+        race=race,
+        current_surface_type=race.surface_type,
+        current_distance_km=race.distance_km,
+        current_discipline=race.discipline,
+        current_race_type=race.race_type,
+        suggested_surface_type=(payload.suggested_surface_type or "").strip(),
+        suggested_distance_km=payload.suggested_distance_km,
+        suggested_discipline=(payload.suggested_discipline or "").strip(),
+        suggested_race_type=(payload.suggested_race_type or "").strip(),
+        comment=(payload.comment or "").strip(),
+        submitter_name=(payload.submitter_name or "").strip(),
+        submitter_email=(payload.submitter_email or "").strip(),
+    )
+    try:
+        suggestion.save()
+    except ValidationError as exc:
+        message = exc.messages[0] if getattr(exc, "messages", None) else "Invalid correction suggestion."
+        return JsonResponse({"detail": message}, status=400)
+    return suggestion
 
 
 @router.put("/{race_id}", response=RaceSchema)

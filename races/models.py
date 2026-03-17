@@ -6,6 +6,7 @@ import unicodedata
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.utils import timezone
 
 
 # Source website choices - used by both Event and Race models
@@ -899,6 +900,133 @@ class Race(models.Model):
 
     def __str__(self):
         return f"{self.name} - {self.date}"
+
+
+class RaceCorrectionSuggestion(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('applied', 'Applied'),
+        ('rejected', 'Rejected'),
+    ]
+
+    race = models.ForeignKey(Race, on_delete=models.CASCADE, related_name='correction_suggestions')
+    current_surface_type = models.CharField(max_length=20, choices=RACE_SURFACE_TYPES, default='unknown')
+    current_distance_km = models.FloatField()
+    current_discipline = models.CharField(max_length=20, choices=DISCIPLINE_CHOICES, default='unknown')
+    current_race_type = models.CharField(max_length=20, choices=Race.RACE_TYPES, default='other')
+    suggested_surface_type = models.CharField(
+        max_length=20,
+        choices=RACE_SURFACE_TYPES,
+        blank=True,
+        help_text="Leave blank if no surface correction is being suggested.",
+    )
+    suggested_distance_km = models.FloatField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0.1)],
+        help_text="Leave empty if no distance correction is being suggested.",
+    )
+    suggested_discipline = models.CharField(
+        max_length=20,
+        choices=DISCIPLINE_CHOICES,
+        blank=True,
+        help_text="Leave blank if no discipline correction is being suggested.",
+    )
+    suggested_race_type = models.CharField(
+        max_length=20,
+        choices=Race.RACE_TYPES,
+        blank=True,
+        help_text="Leave blank if no race type correction is being suggested.",
+    )
+    comment = models.TextField(blank=True)
+    submitter_name = models.CharField(max_length=120, blank=True)
+    submitter_email = models.EmailField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'created_at']),
+            models.Index(fields=['race', 'status']),
+        ]
+
+    def clean(self):
+        has_changed_field = False
+
+        if self.suggested_surface_type and self.suggested_surface_type != self.current_surface_type:
+            has_changed_field = True
+        if (
+            self.suggested_distance_km is not None
+            and abs(float(self.suggested_distance_km) - float(self.current_distance_km)) > 1e-6
+        ):
+            has_changed_field = True
+        if self.suggested_discipline and self.suggested_discipline != self.current_discipline:
+            has_changed_field = True
+        if self.suggested_race_type and self.suggested_race_type != self.current_race_type:
+            has_changed_field = True
+
+        if not has_changed_field:
+            raise ValidationError(
+                "At least one suggested field must differ from the current race classification."
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def apply_to_race(self, review_notes: str = '') -> None:
+        now = timezone.now()
+        race_updates = {}
+
+        if self.suggested_surface_type:
+            race_updates['surface_type'] = self.suggested_surface_type
+        if self.suggested_distance_km is not None:
+            race_updates['distance_km'] = self.suggested_distance_km
+        if self.suggested_discipline:
+            race_updates['discipline'] = self.suggested_discipline
+        if self.suggested_race_type:
+            race_updates['race_type'] = self.suggested_race_type
+
+        if race_updates:
+            race_updates['updated_at'] = now
+            Race.objects.filter(id=self.race_id).update(**race_updates)
+            for field, value in race_updates.items():
+                if field != 'updated_at':
+                    setattr(self.race, field, value)
+
+        if self.race.event_id:
+            event = self.race.event
+            discipline_values = list(
+                Race.objects.filter(event_id=event.id)
+                .exclude(discipline='unknown')
+                .values_list('discipline', flat=True)
+            )
+            next_discipline = Event.infer_discipline_from_race_disciplines(discipline_values)
+            if next_discipline and event.discipline != next_discipline:
+                Event.objects.filter(id=event.id).update(
+                    discipline=next_discipline,
+                    updated_at=now,
+                )
+
+        self.status = 'applied'
+        self.reviewed_at = now
+        if review_notes:
+            self.review_notes = review_notes
+        self.save(update_fields=['status', 'reviewed_at', 'review_notes', 'updated_at'])
+
+    def reject(self, review_notes: str = '') -> None:
+        self.status = 'rejected'
+        self.reviewed_at = timezone.now()
+        if review_notes:
+            self.review_notes = review_notes
+        self.save(update_fields=['status', 'reviewed_at', 'review_notes', 'updated_at'])
+
+    def __str__(self):
+        return f"Suggestion for race {self.race_id} ({self.status})"
 
 
 class Result(models.Model):
