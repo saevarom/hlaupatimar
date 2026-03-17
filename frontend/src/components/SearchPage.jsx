@@ -16,7 +16,8 @@ export default function SearchPage({
   initialSearch,
   onPersistSearch,
   onOpenRace,
-  onSelectRunner
+  onSelectRunner,
+  onOpenRaceList
 }) {
   const [q, setQ] = useState(initialSearch?.q || "");
   const [gender, setGender] = useState(initialSearch?.gender || "");
@@ -411,7 +412,16 @@ export default function SearchPage({
         </div>
       ) : null}
 
-      <h3 className="section-title">Leita að hlaupi</h3>
+      <div className="section-title-row">
+        <h3 className="section-title">Leita að hlaupi</h3>
+        <button
+          className="link-button section-link-button"
+          onClick={() => onOpenRaceList?.({ page: 1 }, "push")}
+          type="button"
+        >
+          Sjá öll hlaup
+        </button>
+      </div>
       <form className="race-search-form" onSubmit={onRaceSubmit}>
         <label>
           Hlaup

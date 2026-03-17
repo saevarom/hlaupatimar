@@ -118,6 +118,23 @@ class RaceClubStatsSchema(Schema):
     average_time: Optional[timedelta] = None
 
 
+class RaceComparisonMetricSchema(Schema):
+    current: Optional[timedelta] = None
+    peer_median: Optional[timedelta] = None
+    rank: Optional[int] = None
+    faster_than_percentage: Optional[float] = None
+    delta_from_peer_median_percentage: Optional[float] = None
+
+
+class RaceComparisonSchema(Schema):
+    cohort_label: str
+    cohort_race_count: int
+    finishers_in_race: int
+    gender_label: Optional[str] = None
+    winner: RaceComparisonMetricSchema
+    median: RaceComparisonMetricSchema
+
+
 class RaceStatsSchema(Schema):
     race_id: int
     total_results: int
@@ -131,6 +148,7 @@ class RaceStatsSchema(Schema):
     gender_breakdown: List[RaceGenderStatsSchema]
     age_breakdown: List[RaceAgeBandStatsSchema]
     club_leaderboard: List[RaceClubStatsSchema]
+    comparison: Optional[RaceComparisonSchema] = None
 
 
 class EventSummarySchema(Schema):
@@ -153,6 +171,12 @@ class RaceSchema(Schema):
     race_type: str
     date: date
     winning_time: Optional[timedelta] = None
+    median_finish_time: Optional[timedelta] = None
+    finisher_count: Optional[int] = None
+    speed_index: Optional[float] = None
+    speed_delta_percentage: Optional[float] = None
+    speed_rank_percentage: Optional[float] = None
+    speed_cohort_size: Optional[int] = None
     location: str
     distance_km: float
     surface_type: str = "unknown"
@@ -167,6 +191,15 @@ class RaceSchema(Schema):
     updated_at: datetime
     source_url: Optional[str] = None
     results_url: Optional[str] = None
+
+
+class PaginatedRaceListSchema(Schema):
+    items: List[RaceSchema]
+    total: int
+    limit: int
+    offset: int
+    has_next: bool
+    has_previous: bool
 
 
 class RaceCreateSchema(Schema):

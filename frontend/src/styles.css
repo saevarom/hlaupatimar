@@ -147,6 +147,13 @@ body {
   margin-bottom: 1rem;
 }
 
+.race-browse-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(120px, 0.5fr) minmax(170px, 0.7fr) auto auto;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
 label {
   display: grid;
   gap: 0.35rem;
@@ -207,6 +214,10 @@ button:disabled {
   text-align: left;
 }
 
+.section-link-button {
+  align-self: center;
+}
+
 a {
   color: var(--accent);
 }
@@ -239,6 +250,15 @@ a:hover {
   color: var(--muted);
 }
 
+.browse-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.8rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .error {
   color: #b33322;
   font-weight: 600;
@@ -254,6 +274,42 @@ a:hover {
 .results-table {
   border-collapse: collapse;
   width: 100%;
+}
+
+.pagination-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.95rem;
+}
+
+.speed-index-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.3rem;
+  padding: 0.24rem 0.55rem;
+  border-radius: 999px;
+  font-family: "Share Tech Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.speed-index-pill-fast {
+  background: rgba(61, 151, 111, 0.14);
+  color: #1f6e4d;
+}
+
+.speed-index-pill-slow {
+  background: rgba(193, 114, 62, 0.15);
+  color: #9a4e20;
+}
+
+.speed-index-pill-neutral {
+  background: rgba(116, 158, 200, 0.14);
+  color: #476c92;
 }
 
 .stats-table + .stats-table {
@@ -328,6 +384,102 @@ a:hover {
 
 .stats-bar-fill-muted {
   background: linear-gradient(90deg, #98afc4 0%, #6f8da9 100%);
+}
+
+.comparison-panel {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.comparison-cohort {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.comparison-summary {
+  margin: -0.25rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.comparison-metric-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.comparison-metric {
+  border: 1px solid rgba(116, 158, 200, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.comparison-metric-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.comparison-metric-top span {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.comparison-pill {
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.2;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.comparison-pill-faster {
+  background: rgba(61, 151, 111, 0.14);
+  color: #1f6e4d;
+}
+
+.comparison-pill-slower {
+  background: rgba(193, 114, 62, 0.15);
+  color: #9a4e20;
+}
+
+.comparison-pill-neutral {
+  background: rgba(116, 158, 200, 0.14);
+  color: #476c92;
+}
+
+.comparison-meta {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.comparison-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.comparison-times div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.comparison-times small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.comparison-times strong {
+  font-size: 1.05rem;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  font-family: "Share Tech Mono", monospace;
 }
 
 .time-metric-grid {
@@ -870,6 +1022,13 @@ a:hover {
   font-family: "Manrope", sans-serif;
 }
 
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 .latest-races-wrap {
   margin-top: 0.45rem;
 }
@@ -906,6 +1065,10 @@ a:hover {
     grid-template-columns: 1fr;
   }
 
+  .race-browse-form {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .stat-row {
     grid-template-columns: 1fr;
   }
@@ -933,6 +1096,17 @@ a:hover {
     grid-template-columns: 1fr;
   }
 
+  .race-browse-form {
+    grid-template-columns: 1fr;
+  }
+
+  .section-title-row,
+  .browse-summary,
+  .pagination-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .tabs {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -943,6 +1117,10 @@ a:hover {
   }
 
   .stats-chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .comparison-times {
     grid-template-columns: 1fr;
   }
 }

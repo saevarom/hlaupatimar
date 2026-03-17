@@ -43,6 +43,10 @@ export function searchRaces(filters) {
   return fetchJson("/api/races/search", filters);
 }
 
+export function browseRaces(filters) {
+  return fetchJson("/api/races/browse", filters);
+}
+
 export function getRunnerDetail(runnerId) {
   return fetchJson(`/api/races/runners/${encodeURIComponent(runnerId)}`);
 }

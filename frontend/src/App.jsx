@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import SearchPage from "./components/SearchPage";
 import RunnerPage from "./components/RunnerPage";
 import RacePage from "./components/RacePage";
+import RaceListPage from "./components/RaceListPage";
 
 function normalizeSearchFilters(filters = {}) {
   const q = typeof filters.q === "string" ? filters.q : "";
@@ -12,6 +13,21 @@ function normalizeSearchFilters(filters = {}) {
   const raceQ = typeof filters.raceQ === "string" ? filters.raceQ : "";
 
   return { q, gender, birthYear, raceQ };
+}
+
+function normalizeRaceBrowseFilters(filters = {}) {
+  const q = typeof filters.q === "string" ? filters.q : "";
+  const yearRaw = filters.year;
+  const year = yearRaw === null || yearRaw === undefined ? "" : String(yearRaw).trim();
+  const orderOptions = new Set(["date_desc", "date_asc", "speed_fastest", "speed_slowest"]);
+  const order =
+    typeof filters.order === "string" && orderOptions.has(filters.order)
+      ? filters.order
+      : "date_desc";
+  const pageRaw = Number(filters.page);
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+
+  return { q, year, order, page };
 }
 
 function buildSearchUrl(filters = {}) {
@@ -35,8 +51,40 @@ function buildSearchUrl(filters = {}) {
   return query ? `/?${query}` : "/";
 }
 
+function buildRaceBrowseUrl(filters = {}) {
+  const normalized = normalizeRaceBrowseFilters(filters);
+  const params = new URLSearchParams();
+
+  if (normalized.q.trim()) {
+    params.set("q", normalized.q.trim());
+  }
+  if (normalized.year) {
+    params.set("year", normalized.year);
+  }
+  if (normalized.order !== "date_desc") {
+    params.set("order", normalized.order);
+  }
+  if (normalized.page > 1) {
+    params.set("page", String(normalized.page));
+  }
+
+  const query = params.toString();
+  return query ? `/hlaup?${query}` : "/hlaup";
+}
+
 function parseRoute(pathname, search) {
   const params = new URLSearchParams(search);
+  if (pathname === "/hlaup" || pathname === "/hlaup/") {
+    return {
+      page: "races",
+      browse: normalizeRaceBrowseFilters({
+        q: params.get("q") || "",
+        year: params.get("year") || "",
+        order: params.get("order") || "date_desc",
+        page: params.get("page") || 1
+      })
+    };
+  }
   if (pathname.startsWith("/runner/")) {
     const rawId = pathname.replace("/runner/", "").trim();
     return { page: "runner", runnerId: decodeURIComponent(rawId) };
@@ -77,6 +125,20 @@ export default function App() {
       toSearch: () => {
         window.history.pushState({}, "", "/");
         setRoute({ page: "search", search: normalizeSearchFilters() });
+      },
+      toRaces: (browseFilters = {}, historyMode = "push") => {
+        const currentRoute = parseRoute(window.location.pathname, window.location.search);
+        const mergedFilters =
+          currentRoute.page === "races"
+            ? normalizeRaceBrowseFilters({ ...currentRoute.browse, ...browseFilters })
+            : normalizeRaceBrowseFilters(browseFilters);
+        const target = buildRaceBrowseUrl(mergedFilters);
+        if (historyMode === "push") {
+          window.history.pushState({}, "", target);
+        } else {
+          window.history.replaceState({}, "", target);
+        }
+        setRoute({ page: "races", browse: mergedFilters });
       },
       persistSearch: (searchFilters, historyMode = "replace") => {
         const currentRoute = parseRoute(window.location.pathname, window.location.search);
@@ -129,6 +191,13 @@ export default function App() {
             onPersistSearch={navigation.persistSearch}
             onOpenRace={(raceId) => navigation.toRace(raceId, null)}
             onSelectRunner={navigation.toRunner}
+            onOpenRaceList={navigation.toRaces}
+          />
+        ) : route.page === "races" ? (
+          <RaceListPage
+            initialBrowse={route.browse}
+            onPersistBrowse={navigation.toRaces}
+            onOpenRace={(raceId) => navigation.toRace(raceId, null)}
           />
         ) : route.page === "runner" ? (
           <RunnerPage

@@ -7,6 +7,7 @@ from django.http import JsonResponse
 from typing import Dict, List, Optional
 from datetime import date, timedelta
 from django.utils import timezone
+from collections import defaultdict
 
 from .models import Race, Result, Split, Runner, RunnerAlias
 from .schemas import (
@@ -16,7 +17,8 @@ from .schemas import (
     ScrapingResultSchema, HTMLContentSchema,
     RunnerSchema, RunnerSearchSchema, RunnerDetailSchema, RaceResultRowSchema, EventSummarySchema,
     RaceStatsSchema, RaceTimeStatsSchema, RaceTimeBucketSchema, RaceGenderStatsSchema,
-    RaceAgeBandStatsSchema, RaceClubStatsSchema
+    RaceAgeBandStatsSchema, RaceClubStatsSchema, RaceComparisonSchema, RaceComparisonMetricSchema,
+    PaginatedRaceListSchema
 )
 from .services import ScrapingService, TimatakaScrapingError
 
@@ -240,6 +242,329 @@ def _age_band_label(age: int) -> str:
     return "60+"
 
 
+def _race_comparison_gender_label(gender: Optional[str]) -> Optional[str]:
+    normalized_gender = (gender or "").strip().upper()
+    if normalized_gender == "F":
+        return "Konur"
+    if normalized_gender == "M":
+        return "Karlar"
+    return None
+
+
+def _race_comparison_surface_label(surface_type: str) -> str:
+    return {
+        "road": "vegahlaup",
+        "trail": "utanvegahlaup",
+        "mixed": "blandað yfirborð",
+        "unknown": "óþekkt yfirborð",
+    }.get((surface_type or "").strip().lower(), "hlaup")
+
+
+def _race_comparison_type_label(race: Race) -> str:
+    race_type = (race.race_type or "").strip().lower()
+    labels = {
+        "5k": "5 km",
+        "10k": "10 km",
+        "half_marathon": "hálft maraþon",
+        "marathon": "maraþon",
+        "ultra": "ultra",
+        "trail": "utanvegahlaup",
+    }
+    if race_type in labels:
+        return labels[race_type]
+    distance_km = float(race.distance_km or 0.0)
+    if distance_km > 0:
+        return f"{distance_km:g} km"
+    return "hlaup"
+
+
+def _race_comparison_label(race: Race) -> str:
+    return f"{_race_comparison_type_label(race)}, {_race_comparison_surface_label(race.surface_type)}"
+
+
+def _race_comparison_cohort_key(race: Race) -> Optional[str]:
+    race_type = (race.race_type or "").strip().lower()
+    surface_type = (race.surface_type or "").strip().lower()
+    distance_km = float(race.distance_km or 0.0)
+
+    if surface_type not in {"road", "mixed"}:
+        return None
+
+    if race_type == "5k" and 4.75 <= distance_km <= 5.25:
+        return f"type:{race_type}:surface:{surface_type}"
+    if race_type == "10k" and 9.5 <= distance_km <= 10.5:
+        return f"type:{race_type}:surface:{surface_type}"
+    if race_type == "half_marathon" and 20.5 <= distance_km <= 21.7:
+        return f"type:{race_type}:surface:{surface_type}"
+    if race_type == "marathon" and 42.0 <= distance_km <= 42.6:
+        return f"type:{race_type}:surface:{surface_type}"
+    return None
+
+
+def _build_race_comparison_metric(
+    current_seconds: Optional[float],
+    peer_metric_seconds: List[float],
+) -> RaceComparisonMetricSchema:
+    sorted_peer_seconds = sorted(peer_metric_seconds)
+    peer_median_seconds = _percentile_seconds(sorted_peer_seconds, 0.50)
+
+    faster_count = sum(value < (current_seconds or 0) for value in sorted_peer_seconds)
+    slower_count = sum(value > (current_seconds or 0) for value in sorted_peer_seconds)
+    comparison_count = len(sorted_peer_seconds)
+
+    faster_than_percentage = (
+        round((slower_count / comparison_count) * 100, 1)
+        if comparison_count
+        else None
+    )
+    delta_from_peer_median_percentage = (
+        round(((current_seconds - peer_median_seconds) / peer_median_seconds) * 100, 1)
+        if current_seconds is not None and peer_median_seconds not in {None, 0}
+        else None
+    )
+
+    return RaceComparisonMetricSchema(
+        current=_timedelta_from_seconds(current_seconds),
+        peer_median=_timedelta_from_seconds(peer_median_seconds),
+        rank=faster_count + 1 if current_seconds is not None else None,
+        faster_than_percentage=faster_than_percentage,
+        delta_from_peer_median_percentage=delta_from_peer_median_percentage,
+    )
+
+
+def _is_plausible_race_performance(
+    race: Race,
+    winner_seconds: float,
+    median_seconds: float,
+) -> bool:
+    distance_km = float(race.distance_km or 0.0)
+    if distance_km <= 0:
+        return False
+
+    minimum_median_seconds = distance_km * 120.0
+    minimum_winner_seconds = distance_km * 90.0
+    return median_seconds >= minimum_median_seconds and winner_seconds >= minimum_winner_seconds
+
+
+def _is_running_race_candidate(race: Race) -> bool:
+    text = " ".join(
+        [
+            str(race.name or ""),
+            str(race.description or ""),
+            str(race.location or ""),
+        ]
+    ).casefold()
+    excluded_keywords = [
+        "hjól",
+        "hjol",
+        "bike",
+        "cycling",
+        "criterium",
+        "tour de",
+        "castelli",
+        "time trial",
+        "mtb",
+        "downhill",
+        "townhill",
+        "tt:",
+        " tt ",
+        "dh",
+        "xc",
+        "skíða",
+        "skida",
+        "ski",
+        "göngu",
+        "gongu",
+        "ganga",
+        "canicross",
+        "hund",
+        "sleða",
+        "sleda",
+        "hringurinn",
+        "scooter",
+        "torfæra",
+        "torfaera",
+    ]
+    if any(keyword in text for keyword in excluded_keywords):
+        return False
+
+    positive_keywords = [
+        "hlaup",
+        "run",
+        "skokk",
+        "mara",
+        "marathon",
+        "trail",
+        "ultra",
+        "5k",
+        "10k",
+        "5km",
+        "10km",
+        "hálf",
+        "half",
+    ]
+    return any(keyword in text for keyword in positive_keywords)
+
+
+def _build_race_speed_data(
+    races: List[Race],
+    gender: Optional[str] = None,
+) -> Dict[int, Dict[str, object]]:
+    minimum_finishers = 5
+    minimum_cohort_races = 5
+    today = timezone.localdate()
+
+    requested_races = [
+        race
+        for race in races
+        if race.date and race.date <= today and _is_running_race_candidate(race)
+    ]
+    if not requested_races:
+        return {}
+
+    requested_cohorts = {
+        int(race.id): _race_comparison_cohort_key(race)
+        for race in requested_races
+    }
+    requested_keys = {key for key in requested_cohorts.values() if key}
+    if not requested_keys:
+        return {}
+
+    peer_races = list(
+        Race.objects.filter(date__lte=today).only(
+            "id",
+            "race_type",
+            "surface_type",
+            "distance_km",
+            "date",
+        )
+    )
+
+    peer_cohort_by_race_id: Dict[int, str] = {}
+    peer_race_ids: List[int] = []
+    for peer_race in peer_races:
+        cohort_key = _race_comparison_cohort_key(peer_race)
+        if cohort_key and cohort_key in requested_keys and _is_running_race_candidate(peer_race):
+            peer_cohort_by_race_id[int(peer_race.id)] = cohort_key
+            peer_race_ids.append(int(peer_race.id))
+
+    if not peer_race_ids:
+        return {}
+
+    results_queryset = Result.objects.filter(
+        race_id__in=peer_race_ids,
+        status="finished",
+        finish_time__isnull=False,
+    )
+    normalized_gender = (gender or "").strip().upper()
+    if normalized_gender in {"F", "M"}:
+        results_queryset = results_queryset.filter(runner__gender=normalized_gender)
+
+    seconds_by_race_id: Dict[int, List[float]] = defaultdict(list)
+    for race_id, finish_time in results_queryset.values_list("race_id", "finish_time").order_by("race_id", "finish_time"):
+        seconds_by_race_id[int(race_id)].append(float(finish_time.total_seconds()))
+
+    cohort_rows: Dict[str, List[Dict[str, object]]] = defaultdict(list)
+    race_stats: Dict[int, Dict[str, object]] = {}
+    peer_race_by_id = {int(race.id): race for race in peer_races}
+
+    for peer_race_id in peer_race_ids:
+        sorted_seconds = seconds_by_race_id.get(peer_race_id, [])
+        if len(sorted_seconds) < minimum_finishers:
+            continue
+
+        median_seconds = _percentile_seconds(sorted_seconds, 0.50)
+        if median_seconds is None:
+            continue
+        if not _is_plausible_race_performance(
+            peer_race_by_id[peer_race_id],
+            winner_seconds=sorted_seconds[0],
+            median_seconds=median_seconds,
+        ):
+            continue
+
+        row = {
+            "race_id": peer_race_id,
+            "winner_seconds": sorted_seconds[0],
+            "median_seconds": median_seconds,
+            "finishers": len(sorted_seconds),
+            "cohort_key": peer_cohort_by_race_id[peer_race_id],
+        }
+        race_stats[peer_race_id] = row
+        cohort_rows[peer_cohort_by_race_id[peer_race_id]].append(row)
+
+    speed_data: Dict[int, Dict[str, object]] = {}
+    for race in requested_races:
+        cohort_key = requested_cohorts.get(int(race.id))
+        current_row = race_stats.get(int(race.id))
+        if not cohort_key or not current_row:
+            continue
+
+        cohort = cohort_rows.get(cohort_key, [])
+        if len(cohort) < minimum_cohort_races:
+            continue
+
+        peer_rows = [row for row in cohort if int(row["race_id"]) != int(race.id)]
+        if not peer_rows:
+            continue
+
+        peer_winner_seconds = [float(row["winner_seconds"]) for row in peer_rows]
+        peer_median_seconds = [float(row["median_seconds"]) for row in peer_rows]
+        if not peer_winner_seconds or not peer_median_seconds:
+            continue
+
+        winner_metric = _build_race_comparison_metric(
+            float(current_row["winner_seconds"]),
+            peer_winner_seconds,
+        )
+        median_metric = _build_race_comparison_metric(
+            float(current_row["median_seconds"]),
+            peer_median_seconds,
+        )
+        peer_median_baseline = _percentile_seconds(sorted(peer_median_seconds), 0.50)
+        speed_index = (
+            round((float(current_row["median_seconds"]) / peer_median_baseline) * 100, 1)
+            if peer_median_baseline not in {None, 0}
+            else None
+        )
+
+        speed_data[int(race.id)] = {
+            "cohort_label": _race_comparison_label(race),
+            "cohort_race_count": len(cohort),
+            "finishers_in_race": int(current_row["finishers"]),
+            "winner_metric": winner_metric,
+            "median_metric": median_metric,
+            "median_seconds": float(current_row["median_seconds"]),
+            "speed_index": speed_index,
+            "speed_delta_percentage": median_metric.delta_from_peer_median_percentage,
+            "speed_rank_percentage": median_metric.faster_than_percentage,
+        }
+
+    return speed_data
+
+
+def _build_race_comparison(
+    race: Race,
+    finished_seconds: List[float],
+    gender: Optional[str] = None,
+) -> Optional[RaceComparisonSchema]:
+    if not finished_seconds:
+        return None
+
+    speed_data = _build_race_speed_data([race], gender=gender).get(int(race.id))
+    if not speed_data:
+        return None
+
+    return RaceComparisonSchema(
+        cohort_label=str(speed_data["cohort_label"]),
+        cohort_race_count=int(speed_data["cohort_race_count"]),
+        finishers_in_race=int(speed_data["finishers_in_race"]),
+        gender_label=_race_comparison_gender_label(gender),
+        winner=speed_data["winner_metric"],
+        median=speed_data["median_metric"],
+    )
+
+
 @router.post("/scrape", response=ScrapingResultSchema)
 def scrape_html_content(request, payload: HTMLContentSchema):
     """
@@ -439,6 +764,93 @@ def list_races(
         queryset = queryset.order_by("-date", "-id")
     
     return queryset[offset:offset + limit]
+
+
+@router.get("/browse", response=PaginatedRaceListSchema)
+def browse_races(
+    request,
+    q: Optional[str] = None,
+    year: Optional[int] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    order_by: str = "date_desc",
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Browse races chronologically with pagination and lightweight filtering."""
+    safe_limit = max(1, min(limit, 100))
+    safe_offset = max(0, offset)
+
+    queryset = Race.objects.all()
+
+    if q:
+        queryset = queryset.filter(
+            Q(name__icontains=q)
+            | Q(description__icontains=q)
+            | Q(location__icontains=q)
+            | Q(organizer__icontains=q)
+        )
+    if year:
+        queryset = queryset.filter(date__year=year)
+    if date_from:
+        queryset = queryset.filter(date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(date__lte=date_to)
+
+    race_items = list(_with_winning_time(queryset))
+    total = len(race_items)
+
+    speed_data_by_race_id = _build_race_speed_data(race_items)
+    for race in race_items:
+        race.median_finish_time = None
+        race.finisher_count = None
+        race.speed_index = None
+        race.speed_delta_percentage = None
+        race.speed_rank_percentage = None
+        race.speed_cohort_size = None
+        speed_data = speed_data_by_race_id.get(int(race.id))
+        if not speed_data:
+            continue
+        race.median_finish_time = _timedelta_from_seconds(speed_data["median_seconds"])
+        race.finisher_count = int(speed_data["finishers_in_race"])
+        race.speed_index = speed_data["speed_index"]
+        race.speed_delta_percentage = speed_data["speed_delta_percentage"]
+        race.speed_rank_percentage = speed_data["speed_rank_percentage"]
+        race.speed_cohort_size = int(speed_data["cohort_race_count"])
+
+    if order_by == "date_asc":
+        race_items.sort(key=lambda race: (race.date, race.id))
+    elif order_by == "speed_fastest":
+        race_items.sort(
+            key=lambda race: (
+                race.speed_index is None,
+                race.speed_index if race.speed_index is not None else float("inf"),
+                race.date,
+                race.id,
+            )
+        )
+    elif order_by == "speed_slowest":
+        race_items.sort(
+            key=lambda race: (
+                race.speed_index is None,
+                -(race.speed_index if race.speed_index is not None else float("-inf")),
+                race.date,
+                race.id,
+            )
+        )
+    else:
+        race_items.sort(key=lambda race: (race.date, race.id), reverse=True)
+
+    items = race_items[safe_offset:safe_offset + safe_limit]
+
+    return PaginatedRaceListSchema(
+        items=items,
+        total=total,
+        limit=safe_limit,
+        offset=safe_offset,
+        has_next=(safe_offset + safe_limit) < total,
+        has_previous=safe_offset > 0,
+    )
 
 
 @router.get("/{race_id}/event-races", response=List[RaceSchema])
@@ -855,6 +1267,12 @@ def get_race_stats(request, race_id: int, gender: Optional[str] = None):
         )
     )
 
+    comparison = _build_race_comparison(
+        race=race,
+        finished_seconds=finished_seconds,
+        gender=gender,
+    )
+
     return RaceStatsSchema(
         race_id=race.id,
         total_results=total_results,
@@ -868,6 +1286,7 @@ def get_race_stats(request, race_id: int, gender: Optional[str] = None):
         gender_breakdown=gender_breakdown,
         age_breakdown=age_breakdown,
         club_leaderboard=club_leaderboard_rows[:10],
+        comparison=comparison,
     )
 
 

@@ -1,4 +1,5 @@
 import os
+import importlib.util
 from pathlib import Path
 from decouple import config
 import dj_database_url
@@ -36,10 +37,11 @@ INSTALLED_APPS = [
 if config('ENABLE_DJANGO_EXTENSIONS', default=DEBUG, cast=bool):
     INSTALLED_APPS.append('django_extensions')
 
+HAS_WHITENOISE = importlib.util.find_spec('whitenoise') is not None
+
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -47,6 +49,9 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+if HAS_WHITENOISE:
+    MIDDLEWARE.insert(2, 'whitenoise.middleware.WhiteNoiseMiddleware')
 
 ROOT_URLCONF = 'hlaupatimar.urls'
 
@@ -100,7 +105,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-if not DEBUG:
+if not DEBUG and HAS_WHITENOISE:
     STORAGES = {
         'default': {
             'BACKEND': 'django.core.files.storage.FileSystemStorage',

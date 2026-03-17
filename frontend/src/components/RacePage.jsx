@@ -82,6 +82,37 @@ function formatPercent(value) {
   return `${Number(value).toFixed(1)}%`;
 }
 
+function formatComparisonDelta(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "Ekki tiltækt";
+  }
+  const absolute = Math.abs(Number(value));
+  if (absolute < 0.1) {
+    return "Mjög nálægt meðaltali";
+  }
+  if (value < 0) {
+    return `${absolute.toFixed(1)}% hraðara`;
+  }
+  return `${absolute.toFixed(1)}% hægara`;
+}
+
+function getComparisonTone(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "neutral";
+  }
+  if (Math.abs(Number(value)) < 0.1) {
+    return "neutral";
+  }
+  return value < 0 ? "faster" : "slower";
+}
+
+function formatComparisonRank(metric, cohortRaceCount) {
+  if (!metric?.rank || !cohortRaceCount) {
+    return "-";
+  }
+  return `${metric.rank}. af ${cohortRaceCount}`;
+}
+
 function formatDeltaDuration(value, baseline) {
   const valueSeconds = parseDurationToSeconds(value);
   const baselineSeconds = parseDurationToSeconds(baseline);
@@ -402,6 +433,10 @@ export default function RacePage({
   });
   const overallMedian = stats?.time_stats?.p50;
   const overallAverage = stats?.time_stats?.average;
+  const comparisonRows = [
+    { key: "median", label: "Miðgildi", metric: stats?.comparison?.median },
+    { key: "winner", label: "Sigurtími", metric: stats?.comparison?.winner }
+  ];
 
   return (
     <section className="panel">
@@ -493,6 +528,51 @@ export default function RacePage({
             </div>
 
             <div className="stats-chart-grid">
+              <article className="stats-chart-card">
+                <h4 className="with-info">
+                  Samanburður við sambærileg hlaup
+                  <InfoTip text="Ber saman þetta hlaup við önnur hlaup með sambærilega vegalengd og sama yfirborði. Lægri tími þýðir hraðara hlaup." />
+                </h4>
+                {stats.comparison ? (
+                  <div className="comparison-panel">
+                    <p className="comparison-cohort">
+                      {stats.comparison.cohort_label}
+                      {stats.comparison.gender_label ? ` · ${stats.comparison.gender_label}` : ""}
+                    </p>
+                    <p className="comparison-summary">
+                      Byggt á {stats.comparison.cohort_race_count} sambærilegum hlaupum.
+                    </p>
+                    <div className="comparison-metric-list">
+                      {comparisonRows.map((row) => (
+                        <div className="comparison-metric" key={row.key}>
+                          <div className="comparison-metric-top">
+                            <span>{row.label}</span>
+                            <strong className={`comparison-pill comparison-pill-${getComparisonTone(row.metric?.delta_from_peer_median_percentage)}`}>
+                              {formatComparisonDelta(row.metric?.delta_from_peer_median_percentage)}
+                            </strong>
+                          </div>
+                          <p className="comparison-meta">
+                            Hraðara en {formatPercent(row.metric?.faster_than_percentage)} sambærilegra hlaupa · sæti {formatComparisonRank(row.metric, stats.comparison.cohort_race_count)}
+                          </p>
+                          <div className="comparison-times">
+                            <div>
+                              <small>Þetta hlaup</small>
+                              <strong>{formatDuration(row.metric?.current)}</strong>
+                            </div>
+                            <div>
+                              <small>Dæmigert hlaup</small>
+                              <strong>{formatDuration(row.metric?.peer_median)}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="quiet">Ekki næg sambærileg gögn til að bera hlaupið saman enn.</p>
+                )}
+              </article>
+
               <article className="stats-chart-card">
                 <h4 className="with-info">
                   Tímadreifing hlaupara
