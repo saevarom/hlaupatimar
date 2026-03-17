@@ -526,6 +526,59 @@ def _attach_race_speed_fields(race_items: List[Race]) -> List[Race]:
     return race_items
 
 
+def _winning_time_seconds(value: Optional[timedelta]) -> Optional[float]:
+    if value is None:
+        return None
+    return float(value.total_seconds())
+
+
+def _sort_race_items(race_items: List[Race], order_by: str) -> List[Race]:
+    if order_by == "date_asc":
+        race_items.sort(key=lambda race: (race.date, race.id))
+    elif order_by == "speed_fastest":
+        race_items.sort(
+            key=lambda race: (
+                race.speed_index is None,
+                race.speed_index if race.speed_index is not None else float("inf"),
+                race.date,
+                race.id,
+            )
+        )
+    elif order_by == "speed_slowest":
+        race_items.sort(
+            key=lambda race: (
+                race.speed_index is None,
+                -(race.speed_index if race.speed_index is not None else 0.0),
+                race.date,
+                race.id,
+            )
+        )
+    elif order_by == "winning_fastest":
+        race_items.sort(
+            key=lambda race: (
+                race.winning_time is None,
+                _winning_time_seconds(race.winning_time)
+                if race.winning_time is not None
+                else float("inf"),
+                race.date,
+                race.id,
+            )
+        )
+    elif order_by == "winning_slowest":
+        race_items.sort(
+            key=lambda race: (
+                race.winning_time is None,
+                -(_winning_time_seconds(race.winning_time) or 0.0),
+                race.date,
+                race.id,
+            )
+        )
+    else:
+        race_items.sort(key=lambda race: (race.date, race.id), reverse=True)
+
+    return race_items
+
+
 def _build_race_comparison(
     race: Race,
     finished_seconds: List[float],
@@ -643,20 +696,44 @@ def get_supported_race_types(request):
 
 
 @router.get("/search", response=List[RaceSchema])
-def search_races(request, q: str, limit: int = 20):
+def search_races(
+    request,
+    q: Optional[str] = None,
+    race_type: Optional[str] = None,
+    surface_type: Optional[str] = None,
+    require_speed_index: bool = False,
+    order_by: str = "date_desc",
+    limit: int = 20,
+):
     """Search races by name, description, or location"""
+    safe_limit = max(1, min(limit, 100))
+    queryset = _public_races()
+
+    if q:
+        queryset = queryset.filter(
+            Q(name__icontains=q) |
+            Q(description__icontains=q) |
+            Q(location__icontains=q) |
+            Q(organizer__icontains=q)
+        )
+    if race_type:
+        queryset = queryset.filter(race_type=race_type)
+    if surface_type:
+        queryset = queryset.filter(surface_type=surface_type)
+
     race_items = list(
-        _with_winning_time(
-            _public_races().filter(
-                Q(name__icontains=q) |
-                Q(description__icontains=q) |
-                Q(location__icontains=q) |
-                Q(organizer__icontains=q)
-            )
-            .order_by("-date", "-id")
-        )[:limit]
+        _with_winning_time(queryset)
     )
-    return _attach_race_speed_fields(race_items)
+    _attach_race_speed_fields(race_items)
+
+    if require_speed_index:
+        race_items = [
+            race for race in race_items
+            if race.speed_index is not None
+        ]
+
+    _sort_race_items(race_items, order_by)
+    return race_items[:safe_limit]
 
 
 @router.get("/events/latest", response=List[EventSummarySchema])
@@ -764,6 +841,9 @@ def browse_races(
     year: Optional[int] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    race_type: Optional[str] = None,
+    surface_type: Optional[str] = None,
+    require_speed_index: bool = False,
     order_by: str = "date_desc",
     limit: int = 50,
     offset: int = 0,
@@ -787,34 +867,21 @@ def browse_races(
         queryset = queryset.filter(date__gte=date_from)
     if date_to:
         queryset = queryset.filter(date__lte=date_to)
+    if race_type:
+        queryset = queryset.filter(race_type=race_type)
+    if surface_type:
+        queryset = queryset.filter(surface_type=surface_type)
 
     race_items = list(_with_winning_time(queryset))
-    total = len(race_items)
-
     _attach_race_speed_fields(race_items)
+    if require_speed_index:
+        race_items = [
+            race for race in race_items
+            if race.speed_index is not None
+        ]
 
-    if order_by == "date_asc":
-        race_items.sort(key=lambda race: (race.date, race.id))
-    elif order_by == "speed_fastest":
-        race_items.sort(
-            key=lambda race: (
-                race.speed_index is None,
-                race.speed_index if race.speed_index is not None else float("inf"),
-                race.date,
-                race.id,
-            )
-        )
-    elif order_by == "speed_slowest":
-        race_items.sort(
-            key=lambda race: (
-                race.speed_index is None,
-                -(race.speed_index if race.speed_index is not None else float("-inf")),
-                race.date,
-                race.id,
-            )
-        )
-    else:
-        race_items.sort(key=lambda race: (race.date, race.id), reverse=True)
+    _sort_race_items(race_items, order_by)
+    total = len(race_items)
 
     items = race_items[safe_offset:safe_offset + safe_limit]
 

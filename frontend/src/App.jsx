@@ -11,15 +11,49 @@ function normalizeSearchFilters(filters = {}) {
   const birthYear =
     birthYearRaw === null || birthYearRaw === undefined ? "" : String(birthYearRaw).trim();
   const raceQ = typeof filters.raceQ === "string" ? filters.raceQ : "";
+  const raceType = typeof filters.raceType === "string" ? filters.raceType : "";
+  const raceSurface = typeof filters.raceSurface === "string" ? filters.raceSurface : "";
+  const raceRequireSpeed = Boolean(filters.raceRequireSpeed);
+  const raceOrderOptions = new Set([
+    "date_desc",
+    "date_asc",
+    "winning_fastest",
+    "winning_slowest",
+    "speed_fastest",
+    "speed_slowest"
+  ]);
+  const raceOrder =
+    typeof filters.raceOrder === "string" && raceOrderOptions.has(filters.raceOrder)
+      ? filters.raceOrder
+      : "date_desc";
 
-  return { q, gender, birthYear, raceQ };
+  return {
+    q,
+    gender,
+    birthYear,
+    raceQ,
+    raceType,
+    raceSurface,
+    raceRequireSpeed,
+    raceOrder
+  };
 }
 
 function normalizeRaceBrowseFilters(filters = {}) {
   const q = typeof filters.q === "string" ? filters.q : "";
   const yearRaw = filters.year;
   const year = yearRaw === null || yearRaw === undefined ? "" : String(yearRaw).trim();
-  const orderOptions = new Set(["date_desc", "date_asc", "speed_fastest", "speed_slowest"]);
+  const raceType = typeof filters.raceType === "string" ? filters.raceType : "";
+  const surfaceType = typeof filters.surfaceType === "string" ? filters.surfaceType : "";
+  const requireSpeedIndex = Boolean(filters.requireSpeedIndex);
+  const orderOptions = new Set([
+    "date_desc",
+    "date_asc",
+    "winning_fastest",
+    "winning_slowest",
+    "speed_fastest",
+    "speed_slowest"
+  ]);
   const order =
     typeof filters.order === "string" && orderOptions.has(filters.order)
       ? filters.order
@@ -27,7 +61,7 @@ function normalizeRaceBrowseFilters(filters = {}) {
   const pageRaw = Number(filters.page);
   const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
 
-  return { q, year, order, page };
+  return { q, year, raceType, surfaceType, requireSpeedIndex, order, page };
 }
 
 function buildSearchUrl(filters = {}) {
@@ -46,6 +80,18 @@ function buildSearchUrl(filters = {}) {
   if (normalized.raceQ.trim()) {
     params.set("raceQ", normalized.raceQ.trim());
   }
+  if (normalized.raceType) {
+    params.set("raceType", normalized.raceType);
+  }
+  if (normalized.raceSurface) {
+    params.set("raceSurface", normalized.raceSurface);
+  }
+  if (normalized.raceRequireSpeed) {
+    params.set("raceHasSpeed", "1");
+  }
+  if (normalized.raceOrder !== "date_desc") {
+    params.set("raceOrder", normalized.raceOrder);
+  }
 
   const query = params.toString();
   return query ? `/?${query}` : "/";
@@ -60,6 +106,15 @@ function buildRaceBrowseUrl(filters = {}) {
   }
   if (normalized.year) {
     params.set("year", normalized.year);
+  }
+  if (normalized.raceType) {
+    params.set("raceType", normalized.raceType);
+  }
+  if (normalized.surfaceType) {
+    params.set("surfaceType", normalized.surfaceType);
+  }
+  if (normalized.requireSpeedIndex) {
+    params.set("requireSpeedIndex", "1");
   }
   if (normalized.order !== "date_desc") {
     params.set("order", normalized.order);
@@ -80,6 +135,9 @@ function parseRoute(pathname, search) {
       browse: normalizeRaceBrowseFilters({
         q: params.get("q") || "",
         year: params.get("year") || "",
+        raceType: params.get("raceType") || "",
+        surfaceType: params.get("surfaceType") || "",
+        requireSpeedIndex: params.get("requireSpeedIndex") === "1",
         order: params.get("order") || "date_desc",
         page: params.get("page") || 1
       })
@@ -103,7 +161,11 @@ function parseRoute(pathname, search) {
       q: params.get("q") || "",
       gender: params.get("gender") || "",
       birthYear: params.get("birthYear") || "",
-      raceQ: params.get("raceQ") || ""
+      raceQ: params.get("raceQ") || "",
+      raceType: params.get("raceType") || "",
+      raceSurface: params.get("raceSurface") || "",
+      raceRequireSpeed: params.get("raceHasSpeed") === "1",
+      raceOrder: params.get("raceOrder") || "date_desc"
     })
   };
 }

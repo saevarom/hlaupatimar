@@ -2,6 +2,34 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getLatestEvents, searchRaces, searchRunners } from "../api";
 import { formatDuration, formatIsoDate } from "../lib/time";
 
+const RACE_TYPE_OPTIONS = [
+  { value: "", label: "Allir flokkar" },
+  { value: "5k", label: "5 km" },
+  { value: "10k", label: "10 km" },
+  { value: "half_marathon", label: "Hálft maraþon" },
+  { value: "marathon", label: "Maraþon" },
+  { value: "trail", label: "Utanvegahlaup" },
+  { value: "ultra", label: "Ultra" },
+  { value: "other", label: "Annað" }
+];
+
+const SURFACE_OPTIONS = [
+  { value: "", label: "Öll yfirborð" },
+  { value: "road", label: "Vegur" },
+  { value: "trail", label: "Slóði" },
+  { value: "mixed", label: "Blandað" },
+  { value: "unknown", label: "Óþekkt" }
+];
+
+const RACE_ORDER_OPTIONS = [
+  { value: "date_desc", label: "Nýjust fyrst" },
+  { value: "date_asc", label: "Elst fyrst" },
+  { value: "winning_fastest", label: "Stysti sigurtími fyrst" },
+  { value: "winning_slowest", label: "Lengsti sigurtími fyrst" },
+  { value: "speed_fastest", label: "Lægsti hraðastuðull fyrst" },
+  { value: "speed_slowest", label: "Hæsti hraðastuðull fyrst" }
+];
+
 function birtaKyn(gender) {
   if (gender === "F") {
     return "Kona";
@@ -60,6 +88,10 @@ export default function SearchPage({
   const raceRequestRef = useRef(0);
   const syncingFromRouteRef = useRef(false);
   const [raceQuery, setRaceQuery] = useState(initialSearch?.raceQ || "");
+  const [raceType, setRaceType] = useState(initialSearch?.raceType || "");
+  const [raceSurface, setRaceSurface] = useState(initialSearch?.raceSurface || "");
+  const [raceRequireSpeed, setRaceRequireSpeed] = useState(Boolean(initialSearch?.raceRequireSpeed));
+  const [raceOrder, setRaceOrder] = useState(initialSearch?.raceOrder || "date_desc");
   const [raceLoading, setRaceLoading] = useState(false);
   const [raceError, setRaceError] = useState("");
   const [raceResults, setRaceResults] = useState([]);
@@ -69,7 +101,14 @@ export default function SearchPage({
     () => q.trim().length > 0 || gender || birthYear,
     [q, gender, birthYear]
   );
-  const canSearchRaces = useMemo(() => raceQuery.trim().length > 0, [raceQuery]);
+  const canSearchRaces = useMemo(
+    () =>
+      raceQuery.trim().length > 0 ||
+      raceType.length > 0 ||
+      raceSurface.length > 0 ||
+      raceRequireSpeed,
+    [raceQuery, raceType, raceSurface, raceRequireSpeed]
+  );
 
   async function runSearchWithFilters(
     filters,
@@ -91,7 +130,11 @@ export default function SearchPage({
       onPersistSearch?.(
         {
           ...searchFilters,
-          raceQ: raceQuery.trim()
+          raceQ: raceQuery.trim(),
+          raceType,
+          raceSurface,
+          raceRequireSpeed,
+          raceOrder
         },
         historyMode
       );
@@ -159,12 +202,20 @@ export default function SearchPage({
     const nextGender = initialSearch?.gender || "";
     const nextBirthYear = initialSearch?.birthYear || "";
     const nextRaceQ = initialSearch?.raceQ || "";
+    const nextRaceType = initialSearch?.raceType || "";
+    const nextRaceSurface = initialSearch?.raceSurface || "";
+    const nextRaceRequireSpeed = Boolean(initialSearch?.raceRequireSpeed);
+    const nextRaceOrder = initialSearch?.raceOrder || "date_desc";
 
     syncingFromRouteRef.current = true;
     setQ(nextQ);
     setGender(nextGender);
     setBirthYear(nextBirthYear);
     setRaceQuery(nextRaceQ);
+    setRaceType(nextRaceType);
+    setRaceSurface(nextRaceSurface);
+    setRaceRequireSpeed(nextRaceRequireSpeed);
+    setRaceOrder(nextRaceOrder);
     setError("");
     setResults([]);
     setHasSearched(false);
@@ -174,7 +225,8 @@ export default function SearchPage({
 
     const hasRunnerCriteria =
       nextQ.trim().length > 0 || nextGender.length > 0 || nextBirthYear.length > 0;
-    const hasRaceCriteria = nextRaceQ.trim().length > 0;
+    const hasRaceCriteria =
+      nextRaceQ.trim().length > 0 || nextRaceType || nextRaceSurface || nextRaceRequireSpeed;
 
     if (!hasRunnerCriteria && !hasRaceCriteria) {
       syncingFromRouteRef.current = false;
@@ -193,6 +245,10 @@ export default function SearchPage({
     if (hasRaceCriteria) {
       tasks.push(
         runRaceSearchWithQuery(nextRaceQ, {
+          raceType: nextRaceType,
+          raceSurface: nextRaceSurface,
+          raceRequireSpeed: nextRaceRequireSpeed,
+          raceOrder: nextRaceOrder,
           historyMode: "replace",
           persistHistory: false
         })
@@ -202,14 +258,30 @@ export default function SearchPage({
     void Promise.allSettled(tasks).finally(() => {
       syncingFromRouteRef.current = false;
     });
-  }, [initialSearch?.q, initialSearch?.gender, initialSearch?.birthYear, initialSearch?.raceQ]);
+  }, [
+    initialSearch?.q,
+    initialSearch?.gender,
+    initialSearch?.birthYear,
+    initialSearch?.raceQ,
+    initialSearch?.raceType,
+    initialSearch?.raceSurface,
+    initialSearch?.raceRequireSpeed,
+    initialSearch?.raceOrder
+  ]);
 
   async function runRaceSearchWithQuery(
     queryValue,
-    { historyMode = "replace", persistHistory = true } = {}
+    {
+      raceType: nextRaceType = raceType,
+      raceSurface: nextRaceSurface = raceSurface,
+      raceRequireSpeed: nextRaceRequireSpeed = raceRequireSpeed,
+      raceOrder: nextRaceOrder = raceOrder,
+      historyMode = "replace",
+      persistHistory = true
+    } = {}
   ) {
     const query = (queryValue || "").trim();
-    if (!query) {
+    if (!query && !nextRaceType && !nextRaceSurface && !nextRaceRequireSpeed) {
       return;
     }
 
@@ -219,7 +291,11 @@ export default function SearchPage({
           q: q.trim(),
           gender,
           birthYear,
-          raceQ: query
+          raceQ: query,
+          raceType: nextRaceType,
+          raceSurface: nextRaceSurface,
+          raceRequireSpeed: nextRaceRequireSpeed,
+          raceOrder: nextRaceOrder
         },
         historyMode
       );
@@ -233,7 +309,14 @@ export default function SearchPage({
     setHasRaceSearched(true);
 
     try {
-      const races = await searchRaces({ q: query, limit: 30 });
+      const races = await searchRaces({
+        q: query || undefined,
+        race_type: nextRaceType || undefined,
+        surface_type: nextRaceSurface || undefined,
+        require_speed_index: nextRaceRequireSpeed || undefined,
+        order_by: nextRaceOrder,
+        limit: 30
+      });
       if (raceRequestRef.current === requestId) {
         setRaceResults(races);
       }
@@ -263,7 +346,8 @@ export default function SearchPage({
       return undefined;
     }
 
-    if (raceQuery.trim().length < 3) {
+    const hasCriteria = raceQuery.trim().length > 0 || raceType || raceSurface || raceRequireSpeed;
+    if (!hasCriteria || (raceQuery.trim().length > 0 && raceQuery.trim().length < 3)) {
       return undefined;
     }
 
@@ -272,7 +356,7 @@ export default function SearchPage({
     }, 350);
 
     return () => clearTimeout(timeoutId);
-  }, [raceQuery]);
+  }, [raceQuery, raceType, raceSurface, raceRequireSpeed, raceOrder]);
 
   useEffect(() => {
     let cancelled = false;
@@ -443,25 +527,79 @@ export default function SearchPage({
         <h3 className="section-title">Leita að hlaupi</h3>
         <button
           className="link-button section-link-button"
-          onClick={() => onOpenRaceList?.({ page: 1 }, "push")}
+          onClick={() =>
+            onOpenRaceList?.(
+              {
+                q: raceQuery.trim(),
+                raceType,
+                surfaceType: raceSurface,
+                requireSpeedIndex: raceRequireSpeed,
+                order: raceOrder,
+                page: 1
+              },
+              "push"
+            )
+          }
           type="button"
         >
           Sjá öll hlaup
         </button>
       </div>
       <form className="race-search-form" onSubmit={onRaceSubmit}>
-        <label>
-          Hlaup
-          <input
-            type="search"
-            placeholder="Prófaðu: Reykjavíkurmaraþon, vetrarhlaup..."
-            value={raceQuery}
-            onChange={(event) => setRaceQuery(event.target.value)}
-          />
-        </label>
-        <button type="submit" disabled={!canSearchRaces || raceLoading}>
-          {raceLoading ? "Leita..." : "Leita"}
-        </button>
+        <div className="race-search-form-primary">
+          <label>
+            Hlaup
+            <input
+              type="search"
+              placeholder="Prófaðu: Reykjavíkurmaraþon, vetrarhlaup..."
+              value={raceQuery}
+              onChange={(event) => setRaceQuery(event.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={!canSearchRaces || raceLoading}>
+            {raceLoading ? "Leita..." : "Leita"}
+          </button>
+        </div>
+        <div className="race-search-form-secondary">
+          <label>
+            Flokkur
+            <select value={raceType} onChange={(event) => setRaceType(event.target.value)}>
+              {RACE_TYPE_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Yfirborð
+            <select value={raceSurface} onChange={(event) => setRaceSurface(event.target.value)}>
+              {SURFACE_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Röðun
+            <select value={raceOrder} onChange={(event) => setRaceOrder(event.target.value)}>
+              {RACE_ORDER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={raceRequireSpeed}
+              onChange={(event) => setRaceRequireSpeed(event.target.checked)}
+            />
+            <span>Sleppa hlaupum án hraðastuðuls</span>
+          </label>
+        </div>
       </form>
       {raceError ? <p className="error">{raceError}</p> : null}
       {hasRaceSearched ? (

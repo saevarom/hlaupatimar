@@ -3,24 +3,55 @@ import { browseRaces } from "../api";
 import { formatDuration, formatIsoDate } from "../lib/time";
 
 const PAGE_SIZE = 50;
+const ORDER_OPTIONS = [
+  { value: "date_desc", label: "Nýjust fyrst" },
+  { value: "date_asc", label: "Elst fyrst" },
+  { value: "winning_fastest", label: "Stysti sigurtími fyrst" },
+  { value: "winning_slowest", label: "Lengsti sigurtími fyrst" },
+  { value: "speed_fastest", label: "Lægsti hraðastuðull fyrst" },
+  { value: "speed_slowest", label: "Hæsti hraðastuðull fyrst" }
+];
+const RACE_TYPE_OPTIONS = [
+  { value: "", label: "Allir flokkar" },
+  { value: "5k", label: "5 km" },
+  { value: "10k", label: "10 km" },
+  { value: "half_marathon", label: "Hálft maraþon" },
+  { value: "marathon", label: "Maraþon" },
+  { value: "trail", label: "Utanvegahlaup" },
+  { value: "ultra", label: "Ultra" },
+  { value: "other", label: "Annað" }
+];
+const SURFACE_OPTIONS = [
+  { value: "", label: "Öll yfirborð" },
+  { value: "road", label: "Gata" },
+  { value: "trail", label: "Utanvega" },
+  { value: "mixed", label: "Blandað" },
+  { value: "unknown", label: "Óþekkt" }
+];
 
 function normalizeBrowseFilters(filters = {}) {
   const q = typeof filters.q === "string" ? filters.q : "";
   const yearRaw = filters.year;
   const year = yearRaw === null || yearRaw === undefined ? "" : String(yearRaw).trim();
-  const orderOptions = new Set(["date_desc", "date_asc", "speed_fastest", "speed_slowest"]);
+  const raceType = typeof filters.raceType === "string" ? filters.raceType : "";
+  const surfaceType = typeof filters.surfaceType === "string" ? filters.surfaceType : "";
+  const requireSpeedIndex = Boolean(filters.requireSpeedIndex);
+  const orderOptions = new Set(ORDER_OPTIONS.map((option) => option.value));
   const order =
     typeof filters.order === "string" && orderOptions.has(filters.order)
       ? filters.order
       : "date_desc";
   const pageRaw = Number(filters.page);
   const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
-  return { q, year, order, page };
+  return { q, year, raceType, surfaceType, requireSpeedIndex, order, page };
 }
 
 export default function RaceListPage({ initialBrowse, onPersistBrowse, onOpenRace }) {
   const [query, setQuery] = useState(initialBrowse?.q || "");
   const [year, setYear] = useState(initialBrowse?.year || "");
+  const [raceType, setRaceType] = useState(initialBrowse?.raceType || "");
+  const [surfaceType, setSurfaceType] = useState(initialBrowse?.surfaceType || "");
+  const [requireSpeedIndex, setRequireSpeedIndex] = useState(Boolean(initialBrowse?.requireSpeedIndex));
   const [order, setOrder] = useState(initialBrowse?.order || "date_desc");
   const [pageData, setPageData] = useState({
     items: [],
@@ -38,6 +69,9 @@ export default function RaceListPage({ initialBrowse, onPersistBrowse, onOpenRac
     const normalized = normalizeBrowseFilters(initialBrowse);
     setQuery(normalized.q);
     setYear(normalized.year);
+    setRaceType(normalized.raceType);
+    setSurfaceType(normalized.surfaceType);
+    setRequireSpeedIndex(normalized.requireSpeedIndex);
     setOrder(normalized.order);
 
     const requestId = requestRef.current + 1;
@@ -50,6 +84,9 @@ export default function RaceListPage({ initialBrowse, onPersistBrowse, onOpenRac
         const response = await browseRaces({
           q: normalized.q.trim() || undefined,
           year: normalized.year ? Number(normalized.year) : undefined,
+          race_type: normalized.raceType || undefined,
+          surface_type: normalized.surfaceType || undefined,
+          require_speed_index: normalized.requireSpeedIndex || undefined,
           order_by: normalized.order,
           limit: PAGE_SIZE,
           offset: (normalized.page - 1) * PAGE_SIZE
@@ -88,18 +125,32 @@ export default function RaceListPage({ initialBrowse, onPersistBrowse, onOpenRac
 
   function onSubmit(event) {
     event.preventDefault();
-    updateBrowse({ q: query, year, order, page: 1 }, "push");
+    updateBrowse({ q: query, year, raceType, surfaceType, requireSpeedIndex, order, page: 1 }, "push");
   }
 
   function clearFilters() {
     setQuery("");
     setYear("");
+    setRaceType("");
+    setSurfaceType("");
+    setRequireSpeedIndex(false);
     setOrder("date_desc");
-    updateBrowse({ q: "", year: "", order: "date_desc", page: 1 }, "push");
+    updateBrowse(
+      {
+        q: "",
+        year: "",
+        raceType: "",
+        surfaceType: "",
+        requireSpeedIndex: false,
+        order: "date_desc",
+        page: 1
+      },
+      "push"
+    );
   }
 
   function goToPage(nextPage) {
-    updateBrowse({ q: query, year, order, page: nextPage }, "push");
+    updateBrowse({ q: query, year, raceType, surfaceType, requireSpeedIndex, order, page: nextPage }, "push");
   }
 
   return (
@@ -110,48 +161,143 @@ export default function RaceListPage({ initialBrowse, onPersistBrowse, onOpenRac
       </div>
 
       <form className="race-browse-form" onSubmit={onSubmit}>
-        <label>
-          Nafn eða staður
-          <input
-            type="search"
-            placeholder="Prófaðu: Reykjavíkurmaraþon, Mosfellsbær..."
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
-        <label>
-          Ár
-          <input
-            type="number"
-            min="1900"
-            max="2100"
-            placeholder="2025"
-            value={year}
-            onChange={(event) => setYear(event.target.value)}
-          />
-        </label>
-        <label>
-          Röðun
-          <select
-            value={order}
-            onChange={(event) => {
-              const nextOrder = event.target.value;
-              setOrder(nextOrder);
-              updateBrowse({ q: query, year, order: nextOrder, page: 1 }, "push");
-            }}
-          >
-            <option value="date_desc">Nýjust fyrst</option>
-            <option value="date_asc">Elst fyrst</option>
-            <option value="speed_fastest">Hraðari hlaup fyrst</option>
-            <option value="speed_slowest">Hægari hlaup fyrst</option>
-          </select>
-        </label>
-        <button type="submit" disabled={loading}>
-          {loading ? "Sæki..." : "Sía"}
-        </button>
-        <button className="ghost" type="button" onClick={clearFilters}>
-          Hreinsa
-        </button>
+        <div className="race-browse-form-primary">
+          <label>
+            Nafn eða staður
+            <input
+              type="search"
+              placeholder="Prófaðu: Reykjavíkurmaraþon, Mosfellsbær..."
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <label>
+            Ár
+            <input
+              type="number"
+              min="1900"
+              max="2100"
+              placeholder="2025"
+              value={year}
+              onChange={(event) => setYear(event.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={loading}>
+            {loading ? "Sæki..." : "Sía"}
+          </button>
+          <button className="ghost" type="button" onClick={clearFilters}>
+            Hreinsa
+          </button>
+        </div>
+        <div className="race-browse-form-secondary">
+          <label>
+            Flokkur
+            <select
+              value={raceType}
+              onChange={(event) => {
+                const nextRaceType = event.target.value;
+                setRaceType(nextRaceType);
+                updateBrowse(
+                  {
+                    q: query,
+                    year,
+                    raceType: nextRaceType,
+                    surfaceType,
+                    requireSpeedIndex,
+                    order,
+                    page: 1
+                  },
+                  "push"
+                );
+              }}
+            >
+              {RACE_TYPE_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Yfirborð
+            <select
+              value={surfaceType}
+              onChange={(event) => {
+                const nextSurfaceType = event.target.value;
+                setSurfaceType(nextSurfaceType);
+                updateBrowse(
+                  {
+                    q: query,
+                    year,
+                    raceType,
+                    surfaceType: nextSurfaceType,
+                    requireSpeedIndex,
+                    order,
+                    page: 1
+                  },
+                  "push"
+                );
+              }}
+            >
+              {SURFACE_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Röðun
+            <select
+              value={order}
+              onChange={(event) => {
+                const nextOrder = event.target.value;
+                setOrder(nextOrder);
+                updateBrowse(
+                  {
+                    q: query,
+                    year,
+                    raceType,
+                    surfaceType,
+                    requireSpeedIndex,
+                    order: nextOrder,
+                    page: 1
+                  },
+                  "push"
+                );
+              }}
+            >
+              {ORDER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={requireSpeedIndex}
+              onChange={(event) => {
+                const nextRequireSpeed = event.target.checked;
+                setRequireSpeedIndex(nextRequireSpeed);
+                updateBrowse(
+                  {
+                    q: query,
+                    year,
+                    raceType,
+                    surfaceType,
+                    requireSpeedIndex: nextRequireSpeed,
+                    order,
+                    page: 1
+                  },
+                  "push"
+                );
+              }}
+            />
+            <span>Sleppa hlaupum án hraðastuðuls</span>
+          </label>
+        </div>
       </form>
 
       <div className="browse-summary">

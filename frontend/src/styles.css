@@ -142,16 +142,40 @@ body {
 
 .race-search-form {
   display: grid;
-  grid-template-columns: 1fr auto;
   gap: 0.75rem;
   margin-bottom: 1rem;
 }
 
+.race-search-form-primary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+}
+
+.race-search-form-secondary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+
 .race-browse-form {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(120px, 0.5fr) minmax(170px, 0.7fr) auto auto;
   gap: 0.75rem;
   margin-bottom: 0.9rem;
+}
+
+.race-browse-form-primary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(120px, 0.5fr) auto auto;
+  gap: 0.75rem;
+}
+
+.race-browse-form-secondary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: end;
 }
 
 label {
@@ -159,6 +183,25 @@ label {
   gap: 0.35rem;
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  align-self: end;
+  min-height: 46px;
+}
+
+.checkbox-label input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
+.checkbox-label span {
+  color: var(--text);
+  font-size: 0.9rem;
 }
 
 input,
@@ -1171,11 +1214,17 @@ body.modal-open {
   }
 
   .race-search-form {
-    grid-template-columns: 1fr;
+    gap: 0.75rem;
   }
 
-  .race-browse-form {
+  .race-search-form-primary,
+  .race-search-form-secondary,
+  .race-browse-form-primary {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .race-browse-form-secondary {
+    grid-template-columns: 1fr 1fr 1fr;
   }
 
   .stat-row {
@@ -1214,10 +1263,13 @@ body.modal-open {
   }
 
   .race-search-form {
-    grid-template-columns: 1fr;
+    gap: 0.75rem;
   }
 
-  .race-browse-form {
+  .race-search-form-primary,
+  .race-search-form-secondary,
+  .race-browse-form-primary,
+  .race-browse-form-secondary {
     grid-template-columns: 1fr;
   }
 
